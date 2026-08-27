@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
+use crate::model::NoteValue;
+
 /// (language code, raw JSON contents), embedded at compile time.
 const LANGS: &[(&str, &str)] = &[
     ("en", include_str!("i18n/en.json")),
@@ -79,5 +81,35 @@ pub fn t(key: &str) -> String {
     key.to_string()
 }
 
-// Note/rest/pitch name helpers (`value_name`, `rest_name`, `pitch_name`) land in phase 2
-// alongside `model::NoteValue`, which they read.
+// Keys ordered to match `NoteValue`'s variant order — keep the two in sync.
+const VALUE_KEYS: [&str; 6] = [
+    "value.whole",
+    "value.half",
+    "value.quarter",
+    "value.eighth",
+    "value.sixteenth",
+    "value.thirty_second",
+];
+const REST_KEYS: [&str; 6] = [
+    "rest.whole",
+    "rest.half",
+    "rest.quarter",
+    "rest.eighth",
+    "rest.sixteenth",
+    "rest.thirty_second",
+];
+
+/// Localised name of a note value, e.g. "quarter note" / "noire".
+pub fn value_name(v: NoteValue) -> String {
+    t(VALUE_KEYS[v as usize])
+}
+
+/// Localised name of a rest of the given value, e.g. "quarter rest" / "soupir".
+pub fn rest_name(v: NoteValue) -> String {
+    t(REST_KEYS[v as usize])
+}
+
+/// Localised pitch-class name for a MIDI note number, e.g. "C" / "Do" (octave ignored).
+pub fn pitch_name(midi: u8) -> String {
+    t(&format!("pitch.{}", midi % 12))
+}

@@ -5,6 +5,7 @@
 //! from the `--export` CLI path without opening a window.
 
 pub mod i18n;
+pub mod model;
 
 /// A point on the page, in millimetres, origin at the BOTTOM-LEFT corner (PDF convention).
 #[derive(Clone, Copy, Debug, PartialEq)]
