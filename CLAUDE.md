@@ -91,6 +91,10 @@ never know about pages, egui or PDF.
 - **printpdf trap**: `Op::SetTextCursor` emits `Td`, which is *relative* to the previous line. Wrap
   every text item in its own `StartTextSection` / `EndTextSection` so `BT` resets the matrix and the
   first `Td` is absolute. Otherwise positions accumulate down the page.
+- `Prim::Curve` maps to a printpdf `Line` of four `LinePoint`s: the start with `bezier: false`,
+  both control points with `bezier: true`, the end point with `bezier: false`, `is_closed: false`.
+  Verified in printpdf's `serialize.rs` — two consecutive bezier handles followed by an end point
+  emit the `c` operator.
 - The cover artwork (`src/assets/cover.jpg`, 1024×1024, progressive JPEG) decodes with
   `image = { version = "0.25", default-features = false, features = ["jpeg"] }` —
   `load_from_memory_with_format(.., ImageFormat::Jpeg)?.to_rgba8()`, tested. Feed that to
