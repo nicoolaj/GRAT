@@ -92,13 +92,12 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
     }
     g_clef(origin.x - HEAD_MM + 1.6, origin.y, sp, out);
 
-    // Barlines, and the time signature at the head of the system or wherever the
-    // metre changes. A repeat mark between two bars carries the closing repeat of
-    // the bar on its left and the opening one of the bar on its right, so they are
-    // resolved together — and at the same x as the tablature row above or below.
+    // Barlines, and the time signature. A repeat mark between two bars carries the
+    // closing repeat of the bar on its left and the opening one of the bar on its
+    // right, so they are resolved together — and at the same x as the tablature row
+    // above or below.
     let top = origin.y + 4.0 * sp;
     let dot_ys = [origin.y + 1.5 * sp, origin.y + 2.5 * sp];
-    let mut shown = None;
     for (i, bar) in spacing.bars.iter().enumerate() {
         let x = origin.x + bar.x;
         let closes = if i == 0 {
@@ -117,13 +116,19 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
         };
         barline(kind, x, origin.y, top, &dot_ys, out);
 
+        // Unlike the clef, a time signature is not restated on every system: it
+        // appears once at the start of the piece and again only where the metre
+        // actually changes.
         let sig = doc.time_sig_at(bar.index);
-        if bar.index == first.index {
-            time_signature(origin.x - 3.4, origin.y, sp, sig, out);
-        } else if shown != Some(sig) {
-            time_signature(x + 1.6, origin.y, sp, sig, out);
+        let changed = bar.index == 0 || doc.time_sig_at(bar.index - 1) != sig;
+        if changed {
+            let at = if bar.index == first.index {
+                origin.x - 3.4
+            } else {
+                x + 1.6
+            };
+            time_signature(at, origin.y, sp, sig, out);
         }
-        shown = Some(sig);
     }
     let last = spacing.bars.last().unwrap_or(first);
     let closing = match doc.bars.get(last.index).and_then(|b| b.repeat_end) {

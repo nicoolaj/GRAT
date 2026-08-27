@@ -227,3 +227,139 @@ fn proof_sheet() {
     std::fs::write("dist/notation-preview.svg", svg(&prims, 210.0, 160.0)).unwrap();
     eprintln!("wrote dist/notation-preview.svg");
 }
+
+/// A realistic piece, so the page furniture can be looked at: title block, running
+/// header, footer, several blocks per page, and a repeat spanning a page break.
+fn song() -> Document {
+    let mut doc = Document::new_empty();
+    doc.title = "Strungin".into();
+    doc.author = "Nicolas Jalibert".into();
+    doc.model = BlockModel::ThreeLine;
+
+    let riff = |offset: u8, strum: bool| Bar {
+        events: (0..8)
+            .map(|i| Event {
+                dur: Dur {
+                    base: NoteValue::Eighth,
+                    dots: 0,
+                },
+                notes: vec![Note {
+                    string: (i % 4) as u8 + 2,
+                    fret: offset + (i % 3) as u8,
+                    tech: match i % 5 {
+                        1 => Technique::HammerOn,
+                        2 => Technique::PullOff,
+                        3 => Technique::Slide,
+                        _ => Technique::Plain,
+                    },
+                    tie_next: false,
+                }],
+                strum: strum.then_some(if i % 2 == 0 { Strum::Down } else { Strum::Up }),
+                palm_mute: i < 3,
+                let_ring: false,
+            })
+            .collect(),
+        time_sig: (offset == 3).then_some((4, 4)),
+        repeat_start: offset == 5,
+        repeat_end: (offset == 9).then_some(2),
+    };
+    doc.bars = (0..24)
+        .map(|i| riff(3 + (i % 4) as u8 * 2, i % 2 == 0))
+        .collect();
+    doc
+}
+
+#[test]
+fn page_proof_sheet() {
+    let doc = song();
+    let pages = tablatures::layout::paginate(&doc);
+    assert!(
+        pages.len() >= 2,
+        "24 bars of three-row blocks need more than one page"
+    );
+
+    // Lay the pages out side by side so the furniture can be compared at a glance:
+    // page 1 carries the title block, page 3 the running header, all of them a footer.
+    let gap = 8.0;
+    let mut prims = Vec::new();
+    for (i, page) in pages.iter().enumerate() {
+        let dx = i as f32 * (210.0 + gap);
+        prims.push(Prim::Poly {
+            pts: vec![
+                P { x: dx, y: 0.0 },
+                P {
+                    x: dx + 210.0,
+                    y: 0.0,
+                },
+                P {
+                    x: dx + 210.0,
+                    y: 297.0,
+                },
+                P { x: dx, y: 297.0 },
+            ],
+            color: tablatures::Rgb(0xFF, 0xFF, 0xFF),
+        });
+        prims.extend(page.prims.iter().cloned().map(|p| shift(p, dx)));
+    }
+
+    assert!(
+        pages.iter().all(|p| p
+            .hits
+            .iter()
+            .all(|h| h.min.x >= 0.0 && h.max.x <= 210.0 && h.min.y >= 0.0 && h.max.y <= 297.0)),
+        "every clickable cell stays on the page"
+    );
+
+    let width = pages.len() as f32 * (210.0 + gap);
+    std::fs::create_dir_all("dist").ok();
+    std::fs::write("dist/page-preview.svg", svg(&prims, width, 297.0)).unwrap();
+    eprintln!("wrote dist/page-preview.svg — {} pages", pages.len());
+}
+
+/// Move a primitive sideways, to place whole pages next to each other.
+fn shift(p: Prim, dx: f32) -> Prim {
+    let m = |q: P| P {
+        x: q.x + dx,
+        y: q.y,
+    };
+    match p {
+        Prim::Line { a, b, w, color } => Prim::Line {
+            a: m(a),
+            b: m(b),
+            w,
+            color,
+        },
+        Prim::Poly { pts, color } => Prim::Poly {
+            pts: pts.into_iter().map(m).collect(),
+            color,
+        },
+        Prim::Curve {
+            a,
+            c1,
+            c2,
+            b,
+            w,
+            color,
+        } => Prim::Curve {
+            a: m(a),
+            c1: m(c1),
+            c2: m(c2),
+            b: m(b),
+            w,
+            color,
+        },
+        Prim::Text {
+            pos,
+            s,
+            pt,
+            color,
+            align,
+        } => Prim::Text {
+            pos: m(pos),
+            s,
+            pt,
+            color,
+            align,
+        },
+    }
+}
