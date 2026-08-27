@@ -91,6 +91,16 @@ never know about pages, egui or PDF.
 - **printpdf trap**: `Op::SetTextCursor` emits `Td`, which is *relative* to the previous line. Wrap
   every text item in its own `StartTextSection` / `EndTextSection` so `BT` resets the matrix and the
   first `Td` is absolute. Otherwise positions accumulate down the page.
+- The cover artwork (`src/assets/cover.jpg`, 1024×1024, progressive JPEG) decodes with
+  `image = { version = "0.25", default-features = false, features = ["jpeg"] }` —
+  `load_from_memory_with_format(.., ImageFormat::Jpeg)?.to_rgba8()`, tested. Feed that to
+  `egui::ColorImage::from_rgba_unmultiplied` for the About and help pages, and to the viewport icon.
+  Downscale to ~256 px first with `image::imageops`: the full frame is 4 MB of RGBA for something
+  drawn at a fraction of that.
+- The macOS icon pipeline is `sips -s format png -z N N src/assets/cover.jpg --out
+  icon.iconset/icon_NxN.png` for N in 16/32/128/256/512 plus their `@2x`, then
+  `iconutil -c icns icon.iconset`. Tested end to end; both tools ship with macOS, so `make app`
+  needs no extra install.
 
 ## Recipes
 
