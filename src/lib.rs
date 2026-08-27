@@ -4,8 +4,12 @@
 //! Kept free of any GUI dependency so it can be exercised from integration tests and
 //! from the `--export` CLI path without opening a window.
 
+pub mod engrave;
 pub mod i18n;
 pub mod model;
+pub mod notation;
+pub mod staff;
+pub mod tablature;
 
 /// A point on the page, in millimetres, origin at the BOTTOM-LEFT corner (PDF convention).
 #[derive(Clone, Copy, Debug, PartialEq)]

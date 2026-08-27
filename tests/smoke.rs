@@ -1,7 +1,7 @@
 //! Integration tests against the public `tablatures` crate API.
 
 use tablatures::i18n;
-use tablatures::model::{Bar, Document, Dur, Event, Note, NoteValue, Strum, Technique};
+use tablatures::model::{Bar, Document, Dur, Event, Note, NoteValue, Technique};
 
 #[test]
 fn pitch_resolves_tuning_fret_and_capo() {
@@ -67,11 +67,12 @@ fn document_round_trips_through_json() {
             Note {
                 string: 1,
                 fret: 1,
-                tech: Technique::Slide { to_fret: 3 },
+                tech: Technique::Slide,
                 tie_next: true,
             },
         ],
-        strum: Some(Strum::Down),
+        strum: None,
+        ..Default::default()
     });
     doc.bars[0].events.push(Event {
         dur: Dur {
@@ -80,10 +81,12 @@ fn document_round_trips_through_json() {
         },
         notes: Vec::new(), // rest
         strum: None,
+        ..Default::default()
     });
     doc.bars.push(Bar {
         events: Vec::new(),
         time_sig: Some((3, 4)),
+        ..Default::default()
     });
 
     let json = serde_json::to_string_pretty(&doc).expect("serialize");
