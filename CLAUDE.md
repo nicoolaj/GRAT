@@ -1,6 +1,6 @@
-# Tablature Creator — guide for Claude and other agents
+# Strungin — guide for Claude and other agents
 
-A desktop editor for six-string guitar tablature: place notes by mouse, save as JSON, print an
+Strungin is a desktop editor for six-string guitar tablature: place notes by mouse, save as JSON, print an
 A4 PDF. Rust, `eframe`/`egui`, one portable binary (macOS/Windows/Linux, ARM and x86).
 
 Author: Nicolas Jalibert <nicoolaj@gmail.com> — https://github.com/nicoolaj
@@ -14,7 +14,7 @@ make run       # cargo run — opens a window; NEVER run this from an agent sess
 make test      # cargo test
 make lint      # cargo clippy --all-targets -- -D warnings
 make build     # release binary into dist/
-make app       # dist/Tablature Creator.app (macOS)
+make app       # dist/Strungin.app (macOS)
 make examples  # regenerate exemples/*.pdf
 ```
 
