@@ -203,6 +203,43 @@ pub struct Bar {
     pub repeat_end: Option<u8>,
 }
 
+impl Bar {
+    /// A bar of the given time signature, filled with rests.
+    ///
+    /// A bar with zero events renders with no clickable cells at all (the tablature
+    /// row only emits a `Hit` per existing event), so a brand-new bar has to start
+    /// out as "rests for the whole bar" rather than as an empty `Vec` — exactly how
+    /// notation software shows an untouched measure. One rest per beat keeps the
+    /// total in ticks exactly equal to `engrave::bar_ticks(time_sig)`, so a fresh
+    /// bar is complete from the start.
+    pub fn new_empty(time_sig: Option<(u8, u8)>) -> Self {
+        let sig = time_sig.unwrap_or((4, 4));
+        let beat = match sig.1 {
+            1 => NoteValue::Whole,
+            2 => NoteValue::Half,
+            8 => NoteValue::Eighth,
+            16 => NoteValue::Sixteenth,
+            32 => NoteValue::ThirtySecond,
+            _ => NoteValue::Quarter,
+        };
+        let events = (0..sig.0)
+            .map(|_| Event {
+                dur: Dur {
+                    base: beat,
+                    dots: 0,
+                },
+                ..Default::default()
+            })
+            .collect();
+        Bar {
+            events,
+            time_sig,
+            repeat_start: false,
+            repeat_end: None,
+        }
+    }
+}
+
 /// How many staff lines (tab / strum / notation) make up one block.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlockModel {
@@ -267,15 +304,11 @@ impl Document {
             .unwrap_or((4, 4))
     }
 
-    /// A fresh document: 8 empty 4/4 bars, so a new page isn't blank.
+    /// A fresh document: 8 empty (rest-filled) 4/4 bars, so a new page isn't blank
+    /// and every beat already has a clickable cell.
     pub fn new_empty() -> Self {
         let bars = (0..8)
-            .map(|i| Bar {
-                events: Vec::new(),
-                time_sig: if i == 0 { Some((4, 4)) } else { None },
-                repeat_start: false,
-                repeat_end: None,
-            })
+            .map(|i| Bar::new_empty(if i == 0 { Some((4, 4)) } else { None }))
             .collect();
         Document {
             title: String::new(),

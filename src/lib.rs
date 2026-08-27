@@ -6,6 +6,7 @@
 
 pub mod engrave;
 pub mod i18n;
+pub mod layout;
 pub mod model;
 pub mod notation;
 pub mod staff;

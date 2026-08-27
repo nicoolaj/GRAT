@@ -1,7 +1,8 @@
 //! Integration tests against the public `tablatures` crate API.
 
 use tablatures::i18n;
-use tablatures::model::{Bar, Document, Dur, Event, Note, NoteValue, Technique};
+use tablatures::layout;
+use tablatures::model::{Bar, BlockModel, Document, Dur, Event, Note, NoteValue, Technique};
 
 #[test]
 fn pitch_resolves_tuning_fret_and_capo() {
@@ -123,4 +124,109 @@ fn t_resolves_known_keys_per_language_and_falls_back_for_unknown_keys() {
 
     let unknown = i18n::t("this.key.does.not.exist");
     assert_eq!(unknown, "this.key.does.not.exist");
+}
+
+/// `n` identical bars of four quarter notes each, in the given block model.
+fn doc_of_bars(n: usize, model: BlockModel) -> Document {
+    let mut doc = Document::new_empty();
+    doc.model = model;
+    doc.bars = (0..n)
+        .map(|i| Bar {
+            events: (0..4)
+                .map(|s| Event {
+                    dur: Dur {
+                        base: NoteValue::Quarter,
+                        dots: 0,
+                    },
+                    notes: vec![Note {
+                        string: (s % 6) as u8,
+                        fret: 2,
+                        tech: Technique::Plain,
+                        tie_next: false,
+                    }],
+                    ..Default::default()
+                })
+                .collect(),
+            time_sig: if i == 0 { Some((4, 4)) } else { None },
+            repeat_start: false,
+            repeat_end: None,
+        })
+        .collect();
+    doc
+}
+
+#[test]
+fn paginate_fits_expected_number_of_pages_for_n_bars() {
+    // A handful of bars is well within one page...
+    let small = layout::paginate(&doc_of_bars(6, BlockModel::ThreeLine));
+    assert_eq!(small.len(), 1, "a handful of bars fits on one page");
+
+    // ...while a large enough count is guaranteed to spill onto more than one,
+    // regardless of the exact margin/title-block constants layout.rs tunes.
+    let large = layout::paginate(&doc_of_bars(200, BlockModel::ThreeLine));
+    assert!(
+        large.len() > 1,
+        "200 bars must not fit on a single A4 page, got {} page(s)",
+        large.len()
+    );
+}
+
+#[test]
+fn page_count_grows_from_one_line_to_three_line() {
+    // Enough bars that ThreeLine's taller block (tab + strum + notation) needs
+    // strictly more pages than OneLine's shorter one (tab alone), for the exact
+    // same music — the whole reason a block's height is computed per model.
+    let bars = 120;
+    let one = layout::paginate(&doc_of_bars(bars, BlockModel::OneLine));
+    let three = layout::paginate(&doc_of_bars(bars, BlockModel::ThreeLine));
+    assert!(
+        three.len() > one.len(),
+        "ThreeLine ({} pages) should need more pages than OneLine ({} pages)",
+        three.len(),
+        one.len()
+    );
+}
+
+#[test]
+fn every_hit_is_non_empty_and_stays_on_the_page() {
+    let pages = layout::paginate(&doc_of_bars(40, BlockModel::ThreeLine));
+    assert!(!pages.is_empty());
+    let mut total_hits = 0;
+    for page in &pages {
+        for hit in &page.hits {
+            total_hits += 1;
+            assert!(
+                hit.max.x > hit.min.x && hit.max.y > hit.min.y,
+                "hit box must be non-empty: {hit:?}"
+            );
+            assert!(
+                hit.min.x >= 0.0
+                    && hit.max.x <= tablatures::PAGE_W_MM
+                    && hit.min.y >= 0.0
+                    && hit.max.y <= tablatures::PAGE_H_MM,
+                "hit box must stay inside the A4 page: {hit:?}"
+            );
+        }
+    }
+    assert!(
+        total_hits > 0,
+        "40 bars of notes must produce clickable cells"
+    );
+}
+
+#[test]
+fn an_empty_document_still_produces_one_furnished_page() {
+    let mut doc = Document::new_empty();
+    doc.bars = Vec::new();
+    let pages = layout::paginate(&doc);
+    assert_eq!(
+        pages.len(),
+        1,
+        "no bars at all still yields exactly one page"
+    );
+    assert!(
+        !pages[0].prims.is_empty(),
+        "the empty page still carries title/footer furniture"
+    );
+    assert!(pages[0].hits.is_empty(), "no bars means no clickable cells");
 }
