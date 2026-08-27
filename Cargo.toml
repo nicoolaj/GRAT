@@ -1,0 +1,28 @@
+[package]
+name = "tablatures"
+version = "0.1.0"
+edition = "2021"
+
+# lib + bin: the core (model, engraving, layout, PDF) is a library that is testable
+# without a GUI; the binary only adds eframe/canvas/menu on top.
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "tablatures"
+path = "src/main.rs"
+
+[dependencies]
+# "persistence" is not in eframe's default feature set (verified against the downloaded
+# source) but is required for Storage (used to persist the manually-picked UI language).
+eframe = { version = "0.36", features = ["persistence"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+printpdf = { version = "0.12", default-features = false }
+rfd = "0.17"
+sys-locale = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
