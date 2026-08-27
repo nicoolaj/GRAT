@@ -4,11 +4,13 @@
 //! `src/model.rs`, `src/i18n.rs`); this binary only adds the eframe GUI shell and the
 //! `--export` CLI entry point on top of it.
 
+mod canvas;
+
 use std::path::PathBuf;
 
 use eframe::egui;
 use tablatures::i18n::{self, t};
-use tablatures::model::{BlockModel, Document};
+use tablatures::model::{BlockModel, Document, StaffOrder};
 
 const SHORTCUT_NEW: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
@@ -24,6 +26,8 @@ const SHORTCUT_EXPORT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
 const SHORTCUT_QUIT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
+const SHORTCUT_UNDO: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
 
 fn main() -> eframe::Result {
     // CLI mode: `tablatures --export <in.gtab> <out.pdf>`. Never opens a window.
@@ -102,6 +106,7 @@ struct TablaturesApp {
     show_about: bool,
     /// Last error or informational notice, shown in the status bar.
     status_msg: Option<String>,
+    editor: canvas::EditorState,
 }
 
 impl TablaturesApp {
@@ -119,6 +124,7 @@ impl TablaturesApp {
             pending: None,
             show_about: false,
             status_msg: None,
+            editor: canvas::EditorState::default(),
         }
     }
 
@@ -216,6 +222,13 @@ fn model_label(model: BlockModel) -> String {
     }
 }
 
+fn staff_order_label(order: StaffOrder) -> String {
+    match order {
+        StaffOrder::TabFirst => t("staff_order.tab_first"),
+        StaffOrder::NotationFirst => t("staff_order.notation_first"),
+    }
+}
+
 impl eframe::App for TablaturesApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Global keyboard shortcuts: active regardless of which menu (if any) is open.
@@ -239,6 +252,11 @@ impl eframe::App for TablaturesApp {
         }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_QUIT)) {
             self.request_quit(ui.ctx());
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_UNDO))
+            && canvas::undo(&mut self.editor, &mut self.doc)
+        {
+            self.dirty = true;
         }
 
         egui::Panel::top("menu_bar").show(ui, |ui| {
@@ -318,6 +336,88 @@ impl eframe::App for TablaturesApp {
             });
         });
 
+        // ponytail: re-paginated every frame rather than cached and invalidated on
+        // edit -- simplest correct thing for a desktop editor's document sizes;
+        // revisit with a dirty-flag cache if a very large score ever feels laggy.
+        let pages = tablatures::layout::paginate(&self.doc);
+
+        egui::Panel::top("toolbar").show(ui, |ui| {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(t("field.title"));
+                if ui
+                    .add(egui::TextEdit::singleline(&mut self.doc.title).desired_width(140.0))
+                    .changed()
+                {
+                    self.dirty = true;
+                }
+                ui.label(t("field.author"));
+                if ui
+                    .add(egui::TextEdit::singleline(&mut self.doc.author).desired_width(120.0))
+                    .changed()
+                {
+                    self.dirty = true;
+                }
+                ui.separator();
+                ui.label(t("field.tempo"));
+                if ui
+                    .add(egui::DragValue::new(&mut self.doc.tempo).range(1..=400))
+                    .changed()
+                {
+                    self.dirty = true;
+                }
+                ui.label(t("field.capo"));
+                if ui
+                    .add(egui::DragValue::new(&mut self.doc.capo).range(0..=12))
+                    .changed()
+                {
+                    self.dirty = true;
+                }
+                ui.separator();
+                egui::ComboBox::from_id_salt("block_model")
+                    .selected_text(model_label(self.doc.model))
+                    .show_ui(ui, |ui| {
+                        for m in [
+                            BlockModel::OneLine,
+                            BlockModel::TwoLine,
+                            BlockModel::ThreeLine,
+                        ] {
+                            if ui
+                                .selectable_value(&mut self.doc.model, m, model_label(m))
+                                .changed()
+                            {
+                                self.dirty = true;
+                            }
+                        }
+                    });
+                egui::ComboBox::from_id_salt("staff_order")
+                    .selected_text(staff_order_label(self.doc.staff_order))
+                    .show_ui(ui, |ui| {
+                        for o in [StaffOrder::TabFirst, StaffOrder::NotationFirst] {
+                            if ui
+                                .selectable_value(
+                                    &mut self.doc.staff_order,
+                                    o,
+                                    staff_order_label(o),
+                                )
+                                .changed()
+                            {
+                                self.dirty = true;
+                            }
+                        }
+                    });
+            });
+            ui.add_space(4.0);
+        });
+
+        egui::Panel::left("tool_palette").show(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if canvas::palette(ui, &mut self.editor, &mut self.doc).is_some() {
+                    self.dirty = true;
+                }
+            });
+        });
+
         egui::Panel::bottom("status_bar").show(ui, |ui| {
             ui.horizontal(|ui| {
                 if self.dirty {
@@ -329,6 +429,8 @@ impl eframe::App for TablaturesApp {
                 if let Some(msg) = &self.status_msg {
                     ui.colored_label(egui::Color32::from_rgb(0xFF, 0x3B, 0x30), msg);
                 }
+                ui.separator();
+                canvas::status(ui, &mut self.editor, &pages);
             });
         });
 
@@ -372,63 +474,13 @@ impl eframe::App for TablaturesApp {
             }
         }
 
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.heading(t("app.title"));
-            ui.add_space(8.0);
-
-            egui::Grid::new("doc_fields")
-                .num_columns(2)
-                .spacing([12.0, 8.0])
-                .show(ui, |ui| {
-                    ui.label(t("field.title"));
-                    if ui.text_edit_singleline(&mut self.doc.title).changed() {
-                        self.dirty = true;
-                    }
-                    ui.end_row();
-
-                    ui.label(t("field.author"));
-                    if ui.text_edit_singleline(&mut self.doc.author).changed() {
-                        self.dirty = true;
-                    }
-                    ui.end_row();
-
-                    ui.label(t("field.tempo"));
-                    if ui
-                        .add(egui::DragValue::new(&mut self.doc.tempo).range(1..=400))
-                        .changed()
-                    {
-                        self.dirty = true;
-                    }
-                    ui.end_row();
-
-                    ui.label(t("field.capo"));
-                    if ui
-                        .add(egui::DragValue::new(&mut self.doc.capo).range(0..=12))
-                        .changed()
-                    {
-                        self.dirty = true;
-                    }
-                    ui.end_row();
-                });
-
-            ui.add_space(12.0);
-            egui::ComboBox::from_id_salt("block_model")
-                .selected_text(model_label(self.doc.model))
-                .show_ui(ui, |ui| {
-                    for m in [
-                        BlockModel::OneLine,
-                        BlockModel::TwoLine,
-                        BlockModel::ThreeLine,
-                    ] {
-                        if ui
-                            .selectable_value(&mut self.doc.model, m, model_label(m))
-                            .changed()
-                        {
-                            self.dirty = true;
-                        }
-                    }
-                });
-        });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::default())
+            .show(ui, |ui| {
+                if canvas::show(ui, &mut self.editor, &mut self.doc, &pages).is_some() {
+                    self.dirty = true;
+                }
+            });
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
