@@ -25,6 +25,8 @@ serde_json = "1"
 printpdf = { version = "0.12", default-features = false }
 rfd = "0.17"
 sys-locale = "0.3"
+# Only the jpeg decoder: src/assets/cover.jpg is the one image this app ever reads.
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [profile.release]
 opt-level = 3

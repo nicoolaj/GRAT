@@ -1,0 +1,601 @@
+{
+  "title": "Slow Bend",
+  "author": "Nicolas Jalibert",
+  "tuning": [
+    64,
+    59,
+    55,
+    50,
+    45,
+    40
+  ],
+  "capo": 0,
+  "tempo": 70,
+  "model": "TwoLine",
+  "staff_order": "TabFirst",
+  "bars": [
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 8,
+              "tech": {
+                "Bend": {
+                  "quarters": 4
+                }
+              },
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 8,
+              "tech": "Vibrato",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": [
+        4,
+        4
+      ],
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 8,
+              "tech": {
+                "BendRelease": {
+                  "quarters": 4
+                }
+              },
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 8,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Half",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 10,
+              "tech": {
+                "PreBend": {
+                  "quarters": 2
+                }
+              },
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Half",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 8,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 8,
+              "tech": "WideVibrato",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 6,
+              "tech": {
+                "Bend": {
+                  "quarters": 4
+                }
+              },
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 6,
+              "tech": "Vibrato",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 3,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 6,
+              "tech": {
+                "BendRelease": {
+                  "quarters": 4
+                }
+              },
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 3,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 6,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Half",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 8,
+              "tech": {
+                "PreBend": {
+                  "quarters": 2
+                }
+              },
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Half",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 6,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 6,
+              "tech": "WideVibrato",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 3,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Quarter",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 3,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Whole",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 1,
+              "fret": 5,
+              "tech": "Vibrato",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    }
+  ]
+}

@@ -9,6 +9,7 @@ pub mod i18n;
 pub mod layout;
 pub mod model;
 pub mod notation;
+pub mod pdf;
 pub mod staff;
 pub mod tablature;
 

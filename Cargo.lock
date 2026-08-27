@@ -1732,6 +1732,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -3368,6 +3370,7 @@ name = "strungin"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "image",
  "printpdf",
  "rfd",
  "serde",

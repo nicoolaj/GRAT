@@ -1,0 +1,1165 @@
+{
+  "title": "Legato Study",
+  "author": "Nicolas Jalibert",
+  "tuning": [
+    64,
+    59,
+    55,
+    50,
+    45,
+    40
+  ],
+  "capo": 0,
+  "tempo": 96,
+  "model": "OneLine",
+  "staff_order": "TabFirst",
+  "bars": [
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 5,
+              "tech": "HammerOn",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "HammerOn",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "PullOff",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "PullOff",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": [
+        4,
+        4
+      ],
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 5,
+              "tech": "Slide",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "SlideShift",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 12,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 5,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "HammerOn",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "HammerOn",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "PullOff",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "PullOff",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Slide",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "SlideShift",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 14,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 8,
+              "tech": "HammerOn",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 10,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 10,
+              "tech": "HammerOn",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 12,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 12,
+              "tech": "PullOff",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 10,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 10,
+              "tech": "PullOff",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 8,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 8,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 8,
+              "tech": "Slide",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 12,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 12,
+              "tech": "SlideShift",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 15,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 12,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 10,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 8,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "HammerOn",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "HammerOn",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "PullOff",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "PullOff",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    },
+    {
+      "events": [
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Slide",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "SlideShift",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 14,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 11,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 9,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        },
+        {
+          "dur": {
+            "base": "Eighth",
+            "dots": 0
+          },
+          "notes": [
+            {
+              "string": 2,
+              "fret": 7,
+              "tech": "Plain",
+              "tie_next": false
+            }
+          ],
+          "strum": null,
+          "palm_mute": false,
+          "let_ring": false
+        }
+      ],
+      "time_sig": null,
+      "repeat_start": false,
+      "repeat_end": null
+    }
+  ]
+}

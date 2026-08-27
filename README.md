@@ -22,8 +22,8 @@ Un document choisit, globalement ou par réglage, entre trois présentations
 (`model::BlockModel`) :
 
 - **Une ligne** — tablature seule.
-- **Deux lignes** — tablature + ligne de grattage (sens du médiator / tapping).
-- **Trois lignes** — tablature + grattage + portée en notation classique (clé de sol 8va).
+- **Deux lignes** — tablature + portée en notation classique (clé de sol 8va).
+- **Trois lignes** — tablature + grattage (sens du médiator / tapping) + portée en notation classique.
 
 L'ordre tablature/portée est configurable (`StaffOrder::TabFirst` / `NotationFirst`,
 défaut tablature en haut). Les trois lignes d'un même bloc partagent le même espacement
@@ -43,23 +43,21 @@ chargement (`#[serde(default)]`).
 |---|---|
 | `run` | `cargo run` |
 | `build` | `cargo build --release` puis copie du binaire dans `dist/` |
-| `app` | empaquette `dist/Strungin.app` (Info.plist + binaire) — macOS |
-| `examples` | régénère `exemples/*.pdf` via `--export` (arrive en phase 6) |
+| `app` | empaquette `dist/Strungin.app` (Info.plist + icône .icns + binaire) — macOS |
+| `examples` | régénère `exemples/*.pdf` via `--export` |
 | `test` | `cargo test` |
 | `fmt` | `cargo fmt` |
 | `lint` | `cargo clippy --all-targets -- -D warnings` |
-| `clean` | `cargo clean` + vide `dist/` |
+| `clean` | `cargo clean` + vide `dist/` et `build/` |
 
 ## État du projet
 
-Ce dépôt suit un plan de développement en 6 phases, chacune laissant une application qui
-compile et se lance. Sont en place ici les **phases 1 et 2** : squelette de l'application
-(fenêtre eframe thémée, menu complet, raccourcis clavier, i18n FR/EN avec détection de la
-locale système) et le modèle de données (`model.rs`) avec persistance JSON (nouveau /
-charger / enregistrer / enregistrer sous, indicateur de modifications non enregistrées).
-
-La gravure musicale complète (ligatures, hampes, liaisons, portée, altérations...), le
-rendu à l'écran de la page et l'export PDF arrivent dans les phases suivantes.
+Les 6 phases du plan de développement sont terminées : squelette et thème, modèle de
+données et persistance JSON, mise en page et rendu écran, édition à la souris, gravure
+complète (ligatures, hampes, liaisons, portée, altérations), export PDF et finitions
+(menu Aide, à propos, icône de fenêtre et de bundle, exemples). `make run` ouvre
+l'application complète ; `make examples` régénère les PDF du dossier `exemples/`, qui
+montrent les trois modèles de bloc sur des morceaux courts mais musicalement plausibles.
 
 ## Licence
 

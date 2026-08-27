@@ -3,6 +3,7 @@
 use strungin::i18n;
 use strungin::layout;
 use strungin::model::{Bar, BlockModel, Document, Dur, Event, Note, NoteValue, Technique};
+use strungin::pdf;
 
 #[test]
 fn pitch_resolves_tuning_fret_and_capo() {
@@ -229,4 +230,60 @@ fn an_empty_document_still_produces_one_furnished_page() {
         "the empty page still carries title/footer furniture"
     );
     assert!(pages[0].hits.is_empty(), "no bars means no clickable cells");
+}
+
+#[test]
+fn pdf_export_starts_with_the_pdf_header() {
+    let bytes = pdf::export(&doc_of_bars(4, BlockModel::OneLine));
+    assert!(
+        bytes.starts_with(b"%PDF-"),
+        "exported bytes must start with the %PDF- header"
+    );
+}
+
+#[test]
+fn pdf_export_page_count_matches_a_two_page_layout() {
+    // Search for a bar count that lands on exactly two pages rather than
+    // hardcoding one -- keeps the test from going stale if layout.rs's
+    // pagination constants ever move.
+    let bars = (1..=300)
+        .find(|&n| layout::paginate(&doc_of_bars(n, BlockModel::OneLine)).len() == 2)
+        .expect("some bar count must yield exactly two pages");
+    let doc = doc_of_bars(bars, BlockModel::OneLine);
+    assert_eq!(layout::paginate(&doc).len(), 2, "fixture must be two pages");
+
+    let bytes = pdf::export(&doc);
+    let mut warnings = Vec::new();
+    let parsed =
+        printpdf::PdfDocument::parse(&bytes, &printpdf::PdfParseOptions::default(), &mut warnings)
+            .expect("exported bytes must parse back as a PDF");
+    assert_eq!(
+        parsed.pages.len(),
+        2,
+        "PDF page count must match the 2-page layout"
+    );
+}
+
+#[test]
+fn pdf_export_handles_harmonic_and_ghost_labels_without_panicking() {
+    // `<12>` (harmonic) and `(5)` (ghost) are exactly the fret-label characters
+    // that broke the SVG proof sheet (see tests/visual.rs); prove pdf.rs's text
+    // path, which goes through printpdf's own text encoding rather than XML
+    // escaping, handles them too.
+    let mut doc = Document::new_empty();
+    doc.bars[0].events[0].notes.push(Note {
+        string: 0,
+        fret: 12,
+        tech: Technique::Harmonic,
+        tie_next: false,
+    });
+    doc.bars[0].events[1].notes.push(Note {
+        string: 1,
+        fret: 5,
+        tech: Technique::Ghost,
+        tie_next: false,
+    });
+
+    let bytes = pdf::export(&doc);
+    assert!(bytes.starts_with(b"%PDF-"));
 }

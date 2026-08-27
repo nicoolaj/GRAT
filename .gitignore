@@ -1,5 +1,6 @@
 /target
 /dist/*
 !/dist/.gitkeep
+/build
 .DS_Store
 **/*.rs.bk
