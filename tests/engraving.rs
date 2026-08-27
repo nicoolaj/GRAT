@@ -1,8 +1,8 @@
 //! Checks on the engraving engine: the decisions that are easy to get wrong and
 //! impossible to eyeball once a page is full of notes.
 
-use tablatures::engrave::{bar_ticks, beam_groups, beam_runs, is_complete, system_spacing};
-use tablatures::model::*;
+use strungin::engrave::{bar_ticks, beam_groups, beam_runs, is_complete, system_spacing};
+use strungin::model::*;
 
 fn note(fret: u8) -> Note {
     Note {

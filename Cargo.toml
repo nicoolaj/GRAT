@@ -1,7 +1,11 @@
 [package]
-name = "tablatures"
+name = "strungin"
 version = "0.1.0"
 edition = "2021"
+authors = ["Nicolas Jalibert <nicoolaj@gmail.com>"]
+description = "Six-string guitar tablature editor: place notes by mouse, print an A4 PDF"
+repository = "https://github.com/nicoolaj"
+license = "CC-BY-NC-SA-4.0"
 
 # lib + bin: the core (model, engraving, layout, PDF) is a library that is testable
 # without a GUI; the binary only adds eframe/canvas/menu on top.
@@ -9,7 +13,7 @@ edition = "2021"
 path = "src/lib.rs"
 
 [[bin]]
-name = "tablatures"
+name = "strungin"
 path = "src/main.rs"
 
 [dependencies]

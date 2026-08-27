@@ -1,8 +1,8 @@
 //! Integration tests against the public `tablatures` crate API.
 
-use tablatures::i18n;
-use tablatures::layout;
-use tablatures::model::{Bar, BlockModel, Document, Dur, Event, Note, NoteValue, Technique};
+use strungin::i18n;
+use strungin::layout;
+use strungin::model::{Bar, BlockModel, Document, Dur, Event, Note, NoteValue, Technique};
 
 #[test]
 fn pitch_resolves_tuning_fret_and_capo() {
@@ -201,9 +201,9 @@ fn every_hit_is_non_empty_and_stays_on_the_page() {
             );
             assert!(
                 hit.min.x >= 0.0
-                    && hit.max.x <= tablatures::PAGE_W_MM
+                    && hit.max.x <= strungin::PAGE_W_MM
                     && hit.min.y >= 0.0
-                    && hit.max.y <= tablatures::PAGE_H_MM,
+                    && hit.max.y <= strungin::PAGE_H_MM,
                 "hit box must stay inside the A4 page: {hit:?}"
             );
         }

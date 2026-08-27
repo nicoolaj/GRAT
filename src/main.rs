@@ -1,6 +1,6 @@
 //! Tablatures desktop app: window, theme, menu, and file/CLI wiring.
 //!
-//! The document model and i18n live in the `tablatures` library crate (see `src/lib.rs`,
+//! The document model and i18n live in the `strungin` library crate (see `src/lib.rs`,
 //! `src/model.rs`, `src/i18n.rs`); this binary only adds the eframe GUI shell and the
 //! `--export` CLI entry point on top of it.
 
@@ -9,8 +9,8 @@ mod canvas;
 use std::path::PathBuf;
 
 use eframe::egui;
-use tablatures::i18n::{self, t};
-use tablatures::model::{BlockModel, Document, StaffOrder};
+use strungin::i18n::{self, t};
+use strungin::model::{BlockModel, Document, StaffOrder};
 
 const SHORTCUT_NEW: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
@@ -339,7 +339,7 @@ impl eframe::App for TablaturesApp {
         // ponytail: re-paginated every frame rather than cached and invalidated on
         // edit -- simplest correct thing for a desktop editor's document sizes;
         // revisit with a dirty-flag cache if a very large score ever feels laggy.
-        let pages = tablatures::layout::paginate(&self.doc);
+        let pages = strungin::layout::paginate(&self.doc);
 
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(4.0);

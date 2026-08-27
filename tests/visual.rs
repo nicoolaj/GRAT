@@ -5,7 +5,7 @@
 //! that the engraver produces primitives for every case, and it is the only way to
 //! actually look at beams, rests and the clef without building a PDF.
 
-use tablatures::{engrave, model::*, notation, tablature, Align, Prim, P};
+use strungin::{engrave, model::*, notation, tablature, Align, Prim, P};
 
 /// Millimetre page primitives to an SVG whose y axis is flipped back to screen order.
 fn svg(prims: &[Prim], w: f32, h: f32) -> String {
@@ -14,7 +14,7 @@ fn svg(prims: &[Prim], w: f32, h: f32) -> String {
          viewBox=\"0 0 {w} {h}\"><rect width=\"{w}\" height=\"{h}\" fill=\"white\"/>\
          <g transform=\"translate(0,{h}) scale(1,-1)\">"
     );
-    let hex = |c: tablatures::Rgb| format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2);
+    let hex = |c: strungin::Rgb| format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2);
     for p in prims {
         match p {
             Prim::Line { a, b, w, color } => s += &format!(
@@ -272,7 +272,7 @@ fn song() -> Document {
 #[test]
 fn page_proof_sheet() {
     let doc = song();
-    let pages = tablatures::layout::paginate(&doc);
+    let pages = strungin::layout::paginate(&doc);
     assert!(
         pages.len() >= 2,
         "24 bars of three-row blocks need more than one page"
@@ -297,7 +297,7 @@ fn page_proof_sheet() {
                 },
                 P { x: dx, y: 297.0 },
             ],
-            color: tablatures::Rgb(0xFF, 0xFF, 0xFF),
+            color: strungin::Rgb(0xFF, 0xFF, 0xFF),
         });
         prims.extend(page.prims.iter().cloned().map(|p| shift(p, dx)));
     }

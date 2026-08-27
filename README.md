@@ -1,6 +1,6 @@
-# Tablatures
+# Strungin
 
-Éditeur de tablatures pour guitare 6 cordes, en Rust (`egui`/`eframe`), avec saisie à la
+Strungin est un éditeur de tablatures pour guitare 6 cordes, en Rust (`egui`/`eframe`), avec saisie à la
 souris et export PDF A4 prêt à imprimer. Binaire unique, portable (macOS en priorité,
 Windows/Linux visés), thème clair/sombre suivant l'OS, interface FR/EN détectée
 automatiquement.
@@ -10,7 +10,7 @@ automatiquement.
 ```sh
 make run      # cargo run — lance la fenêtre
 make build    # cargo build --release, copie le binaire dans dist/
-make app      # (macOS) empaquette dist/Tablatures.app
+make app      # (macOS) empaquette dist/Strungin.app
 make test     # cargo test
 ```
 
@@ -43,7 +43,7 @@ chargement (`#[serde(default)]`).
 |---|---|
 | `run` | `cargo run` |
 | `build` | `cargo build --release` puis copie du binaire dans `dist/` |
-| `app` | empaquette `dist/Tablatures.app` (Info.plist + binaire) — macOS |
+| `app` | empaquette `dist/Strungin.app` (Info.plist + binaire) — macOS |
 | `examples` | régénère `exemples/*.pdf` via `--export` (arrive en phase 6) |
 | `test` | `cargo test` |
 | `fmt` | `cargo fmt` |
@@ -60,3 +60,20 @@ charger / enregistrer / enregistrer sous, indicateur de modifications non enregi
 
 La gravure musicale complète (ligatures, hampes, liaisons, portée, altérations...), le
 rendu à l'écran de la page et l'export PDF arrivent dans les phases suivantes.
+
+## Licence
+
+CC BY-NC-SA 4.0 — voir [LICENSE](LICENSE).
+
+Ce logiciel peut être réutilisé et modifié librement, à trois conditions : créditer l'auteur,
+ne pas en faire un usage commercial, et redistribuer les versions dérivées sous cette même
+licence.
+
+Auteur : Nicolas Jalibert <nicoolaj@gmail.com> — <https://github.com/nicoolaj>
+
+## Faire évoluer le logiciel
+
+[CLAUDE.md](CLAUDE.md) est le guide destiné à Claude et aux autres agents : l'idée
+d'architecture, la carte des modules, les invariants à ne pas casser, les faits d'API déjà
+vérifiés, et des recettes pour les ajouts courants (une technique de jeu, une langue, un
+modèle de bloc).
