@@ -506,8 +506,10 @@ impl eframe::App for TablaturesApp {
                 ui.label(t("field.tab_scale"));
                 if ui
                     .add(
+                        // Numbers and technique glyphs only; the string grid is
+                        // fixed, so past ~1.4 digits on adjacent strings touch.
                         egui::DragValue::new(&mut self.doc.tab_scale)
-                            .range(0.7..=1.6)
+                            .range(0.7..=1.4)
                             .speed(0.01)
                             .max_decimals(2),
                     )

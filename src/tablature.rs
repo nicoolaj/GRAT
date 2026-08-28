@@ -14,15 +14,17 @@ use crate::staff::{
 };
 use crate::{Align, Prim, P};
 
-/// Distance between two string lines at `tab_scale` 1.0.
-const STRING_BASE_MM: f32 = 3.2;
+/// Distance between two string lines. Fixed: `tab_scale` grows the numbers and
+/// technique glyphs printed on the staff, never the string grid itself.
+pub const STRING_MM: f32 = 3.2;
+/// The six-line staff itself.
+pub const STAFF_MM: f32 = 5.0 * STRING_MM;
 /// Band above the staff: bends, vibrato, slurs, palm-mute spans, labels.
 ///
-/// ponytail: `tab_scale` grows the technique glyphs drawn in this band but not the
-/// band itself, so past ~1.35 a bend label pokes ~1 mm above it — absorbed by
-/// `BLOCK_GAP_MM` between stacked blocks, visible only if the tab row sits below
-/// the notation staff at the top clamp. Scale `BAND_MM` / `RHYTHM_MM` with
-/// `tab_scale` if that ever shows.
+/// ponytail: `tab_scale` grows the technique glyphs drawn in this band but not
+/// the band itself, so past ~1.35 a bend label pokes ~1 mm above it — absorbed by
+/// `BLOCK_GAP_MM` between stacked blocks. Grow `BAND_MM` with `tab_scale` if that
+/// ever shows.
 pub const BAND_MM: f32 = 8.0;
 /// Band below the staff: stems and beams, when the block shows rhythm.
 pub const RHYTHM_MM: f32 = 8.0;
@@ -34,16 +36,6 @@ pub const HEAD_MM: f32 = 13.0;
 const LINE_W: f32 = 0.22;
 const FRET_CAP_MM: f32 = 2.0;
 const HIT_HALF_MM: f32 = 2.2;
-
-/// Distance between two string lines, scaled by the document's `tab_scale`.
-pub fn string_mm(scale: f32) -> f32 {
-    STRING_BASE_MM * scale
-}
-
-/// Height of the six-line staff, scaled by the document's `tab_scale`.
-pub fn staff_mm(scale: f32) -> f32 {
-    5.0 * string_mm(scale)
-}
 
 /// A tablature row shows the rhythm itself when no notation staff is there to
 /// carry it — otherwise the block would say which frets to play but never when.
@@ -63,8 +55,8 @@ pub struct Hit {
 }
 
 /// y of a string line. String 0 is the high E, drawn on top.
-fn string_y(origin: P, string: u8, scale: f32) -> f32 {
-    origin.y + (5 - string.min(5)) as f32 * string_mm(scale)
+fn string_y(origin: P, string: u8) -> f32 {
+    origin.y + (5 - string.min(5)) as f32 * STRING_MM
 }
 
 /// The next event in this bar that plays the same string — the partner of a
@@ -117,12 +109,11 @@ pub fn render(
     let Some(first) = spacing.bars.first() else {
         return;
     };
-    let scale = doc.tab_scale;
     let right = origin.x + spacing.width;
-    let top = origin.y + staff_mm(scale);
+    let top = origin.y + STAFF_MM;
 
     for s in 0..6u8 {
-        let y = string_y(origin, s, scale);
+        let y = string_y(origin, s);
         out.push(Prim::Line {
             a: P {
                 x: origin.x - HEAD_MM,
@@ -133,15 +124,12 @@ pub fn render(
             color: INK,
         });
     }
-    tab_label(origin.x - HEAD_MM + 2.0, origin.y, scale, out);
+    tab_label(origin.x - HEAD_MM + 2.0, origin.y, out);
 
     // Barlines. The mark between two bars carries the closing repeat of the one on
     // its left and the opening repeat of the one on its right, which is why they
     // are resolved together rather than per bar.
-    let dot_ys = [
-        origin.y + 1.5 * string_mm(scale),
-        origin.y + 3.5 * string_mm(scale),
-    ];
+    let dot_ys = [origin.y + 1.5 * STRING_MM, origin.y + 3.5 * STRING_MM];
     for (i, bar) in spacing.bars.iter().enumerate() {
         let closes = if i == 0 {
             None
@@ -176,16 +164,14 @@ pub fn render(
     }
 }
 
-/// The stacked "TAB" that opens a tablature staff. Fixed size (it is furniture,
-/// not music), but anchored to the top of the staff so it rides up with a larger
-/// `tab_scale` instead of floating away from it.
-fn tab_label(x: f32, y0: f32, scale: f32, out: &mut Vec<Prim>) {
+/// The stacked "TAB" that opens a tablature staff.
+fn tab_label(x: f32, y0: f32, out: &mut Vec<Prim>) {
     let pt = pt_for_cap(2.6);
     for (i, letter) in ["T", "A", "B"].iter().enumerate() {
         out.push(Prim::Text {
             pos: P {
                 x,
-                y: y0 + staff_mm(scale) - 4.0 - i as f32 * 3.4,
+                y: y0 + STAFF_MM - 4.0 - i as f32 * 3.4,
             },
             s: (*letter).to_string(),
             pt,
@@ -208,9 +194,10 @@ fn render_bar(
     let Some(bar) = doc.bars.get(layout.index) else {
         return;
     };
-    let scale = doc.tab_scale;
-    let cap = FRET_CAP_MM * scale;
-    let band = origin.y + staff_mm(scale) + 1.2;
+    // `tab_scale` grows the fret numbers and technique glyphs printed here; the
+    // string grid, the clickable cells and the band around it stay put.
+    let cap = FRET_CAP_MM * doc.tab_scale;
+    let band = origin.y + STAFF_MM + 1.2;
 
     for (ei, event) in bar.events.iter().enumerate() {
         let Some(&ex) = layout.events.get(ei) else {
@@ -221,24 +208,24 @@ fn render_bar(
         // Every string is clickable, whether or not it currently holds a note:
         // that is how a note gets placed in the first place.
         for s in 0..6u8 {
-            let y = string_y(origin, s, scale);
+            let y = string_y(origin, s);
             hits.push(Hit {
                 bar: layout.index,
                 event: ei,
                 string: s,
                 min: P {
-                    x: x - HIT_HALF_MM * scale,
-                    y: y - string_mm(scale) * 0.5,
+                    x: x - HIT_HALF_MM,
+                    y: y - STRING_MM * 0.5,
                 },
                 max: P {
-                    x: x + HIT_HALF_MM * scale,
-                    y: y + string_mm(scale) * 0.5,
+                    x: x + HIT_HALF_MM,
+                    y: y + STRING_MM * 0.5,
                 },
             });
         }
 
         for note in &event.notes {
-            let y = string_y(origin, note.string, scale);
+            let y = string_y(origin, note.string);
             let grace = matches!(note.tech, Technique::Grace);
             let pt = pt_for_cap(if grace { cap * 0.72 } else { cap });
             let text = fret_label(note);
@@ -266,7 +253,18 @@ fn render_bar(
             });
 
             technique(
-                doc, bar, layout, ei, note, x, y, w, band, origin, scale, out,
+                doc,
+                bar,
+                layout,
+                ei,
+                note,
+                x,
+                y,
+                w,
+                band,
+                origin,
+                doc.tab_scale,
+                out,
             );
         }
     }
@@ -274,8 +272,8 @@ fn render_bar(
 
 /// The glyph that goes with a note's playing technique.
 ///
-/// `scale` is the document's `tab_scale`: the anchors handed in (`y`, `band`, `w`)
-/// already carry it, and `sc()` applies it to the glyph's own magnitudes so a bend
+/// `scale` is the document's `tab_scale`: the fret label `w` handed in already
+/// carries it, and `sc()` applies it to the glyph's own magnitudes so a bend
 /// arrow next to a big fret number grows with it.
 #[allow(clippy::too_many_arguments)]
 fn technique(
@@ -580,9 +578,8 @@ fn bend_arrow(
 /// Palm-mute and let-ring spans, which run across consecutive events rather than
 /// belonging to one note.
 fn spans(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
-    let scale = doc.tab_scale;
-    let sc = |mm: f32| mm * scale;
-    let band = origin.y + staff_mm(scale) + 1.2;
+    let sc = |mm: f32| mm * doc.tab_scale;
+    let band = origin.y + STAFF_MM + 1.2;
     let mut cells: Vec<(f32, bool, bool)> = Vec::new();
     for b in &spacing.bars {
         let Some(bar) = doc.bars.get(b.index) else {

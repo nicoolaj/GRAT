@@ -208,10 +208,10 @@ fn row_kinds(model: BlockModel) -> Vec<RowKind> {
 /// `tablature::render_strum` and `notation::render` exactly, so the block-height
 /// used for pagination and the per-row origins used for rendering can never drift
 /// apart: both are computed from this one function.
-fn row_extent(kind: RowKind, show_rhythm: bool, tab_scale: f32) -> (f32, f32) {
+fn row_extent(kind: RowKind, show_rhythm: bool) -> (f32, f32) {
     match kind {
         RowKind::Tab => (
-            tablature::staff_mm(tab_scale) + tablature::BAND_MM,
+            tablature::STAFF_MM + tablature::BAND_MM,
             if show_rhythm {
                 tablature::RHYTHM_MM
             } else {
@@ -231,7 +231,7 @@ fn block_height(doc: &Document) -> f32 {
     row_kinds(doc.model)
         .iter()
         .map(|&k| {
-            let (above, below) = row_extent(k, show_rhythm, doc.tab_scale);
+            let (above, below) = row_extent(k, show_rhythm);
             above + below
         })
         .sum()
@@ -259,7 +259,7 @@ fn place_block(
     let mut cursor = top;
     let mut tab_origin_y = None;
     for kind in order {
-        let (above, below) = row_extent(kind, show_rhythm, doc.tab_scale);
+        let (above, below) = row_extent(kind, show_rhythm);
         let origin_y = cursor - above;
         cursor = origin_y - below;
         let origin = P::new(x, origin_y);

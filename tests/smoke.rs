@@ -215,21 +215,38 @@ fn denser_note_spacing_shrinks_the_system_and_fits_more_pages() {
 }
 
 #[test]
-fn a_bigger_tab_scale_makes_taller_clickable_cells() {
+fn tab_scale_grows_the_fret_numbers_but_not_the_grid() {
     let mut doc = doc_of_bars(6, BlockModel::OneLine);
 
-    doc.tab_scale = 1.0;
-    let base = layout::paginate(&doc);
-    let base_h = base[0].hits[0].max.y - base[0].hits[0].min.y;
+    // doc_of_bars frets everything at 2, so a "2" text prim is a fret number.
+    let fret_pt = |d: &Document| -> f32 {
+        layout::paginate(d)[0]
+            .prims
+            .iter()
+            .find_map(|p| match p {
+                strungin::Prim::Text { s, pt, .. } if s == "2" => Some(*pt),
+                _ => None,
+            })
+            .expect("a fret-number prim")
+    };
+    let cell_h = |d: &Document| -> f32 {
+        let h = &layout::paginate(d)[0].hits[0];
+        h.max.y - h.min.y
+    };
 
-    doc.tab_scale = 1.5;
-    let big = layout::paginate(&doc);
-    let big_h = big[0].hits[0].max.y - big[0].hits[0].min.y;
+    doc.tab_scale = 1.0;
+    let (pt1, grid1) = (fret_pt(&doc), cell_h(&doc));
+    doc.tab_scale = 1.3;
+    let (pt2, grid2) = (fret_pt(&doc), cell_h(&doc));
 
     assert!(
-        (big_h / base_h - 1.5).abs() < 0.01,
-        "1.5x tab scale should give ~1.5x cell height, got {:.3}x",
-        big_h / base_h
+        (pt2 / pt1 - 1.3).abs() < 0.01,
+        "1.3x tab_scale should give ~1.3x fret-number size, got {:.3}x",
+        pt2 / pt1
+    );
+    assert!(
+        (grid2 - grid1).abs() < 1e-4,
+        "the clickable grid must not move with tab_scale: {grid1} vs {grid2}"
     );
 }
 

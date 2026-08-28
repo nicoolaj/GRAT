@@ -272,9 +272,10 @@ pub struct Document {
     pub capo: u8,
     #[serde(default = "default_tempo")]
     pub tempo: u16,
-    /// Vertical size of the tablature row: string spacing, fret numbers, click
-    /// targets and technique glyphs, all multiplied by this. 1.0 is the default;
-    /// bigger reads more easily, smaller saves height. Screen and PDF alike.
+    /// Size of what is printed on the tablature staff — fret numbers and every
+    /// technique glyph — multiplied by this. The string grid, the clickable
+    /// cells and the staff height are unaffected. 1.0 is the default; bigger
+    /// reads more easily. Screen and PDF alike.
     #[serde(default = "default_scale")]
     pub tab_scale: f32,
     /// Horizontal density of the music: every millimetre of note spacing in
