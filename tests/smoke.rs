@@ -172,6 +172,47 @@ fn paginate_fits_expected_number_of_pages_for_n_bars() {
 }
 
 #[test]
+fn editor_keeps_a_blank_line_below_the_music() {
+    let mut doc = Document::new_empty(); // 8 empty bars
+    let start = doc.bars.len();
+    layout::ensure_trailing_blank_system(&mut doc);
+    assert_eq!(
+        doc.bars.len(),
+        start,
+        "an all-empty document already has a blank line"
+    );
+
+    // Put a note in every bar, so the music now reaches the end of the last line.
+    for b in &mut doc.bars {
+        b.events[0].notes.push(Note {
+            string: 0,
+            fret: 3,
+            tech: Technique::Plain,
+            tie_next: false,
+        });
+    }
+    layout::ensure_trailing_blank_system(&mut doc);
+    assert!(
+        doc.bars.len() > start,
+        "a blank line is appended once the music fills the width"
+    );
+    assert!(
+        doc.bars[start..]
+            .iter()
+            .all(|b| b.events.iter().all(|e| e.is_rest())),
+        "the appended bars are empty"
+    );
+
+    let grown = doc.bars.len();
+    layout::ensure_trailing_blank_system(&mut doc);
+    assert_eq!(
+        doc.bars.len(),
+        grown,
+        "idempotent: a blank line already present is not doubled"
+    );
+}
+
+#[test]
 fn page_count_grows_from_one_line_to_three_line() {
     // Enough bars that ThreeLine's taller block (tab + strum + notation) needs
     // strictly more pages than OneLine's shorter one (tab alone), for the exact

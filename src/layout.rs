@@ -11,7 +11,7 @@ use std::ops::Range;
 
 use crate::engrave::{self, Spacing};
 use crate::i18n;
-use crate::model::{BlockModel, Document, StaffOrder};
+use crate::model::{Bar, BlockModel, Document, StaffOrder};
 use crate::notation;
 use crate::staff::{self, FAINT, INK};
 use crate::tablature;
@@ -106,6 +106,34 @@ fn break_lines(doc: &Document, music_width: f32) -> Vec<Range<usize>> {
         i = j;
     }
     systems
+}
+
+/// Keep at least one completely empty system at the end of the document, so the
+/// editor always has a fresh line to write on: the moment the last line takes a
+/// note, the next one is already there. The editor calls this every frame.
+///
+/// Only ever appends empty bars, never removes, and leaves a document with no
+/// bars at all untouched. It settles after a few pushes — an empty bar is a
+/// little narrower than a full system — but the loop is capped regardless.
+pub fn ensure_trailing_blank_system(doc: &mut Document) {
+    let music_width = PAGE_W_MM - 2.0 * MARGIN_MM - tablature::HEAD_MM;
+    for _ in 0..64 {
+        let systems = break_lines(doc, music_width);
+        let Some(last) = systems.last() else { return };
+        let has_notes = last.clone().any(|bi| {
+            doc.bars
+                .get(bi)
+                .is_some_and(|b| b.events.iter().any(|e| !e.is_rest()))
+        });
+        if !has_notes {
+            return;
+        }
+        let sig = doc.time_sig_at(doc.bars.len() - 1);
+        doc.bars.push(Bar {
+            events: Bar::new_empty(Some(sig)).events,
+            ..Bar::default()
+        });
+    }
 }
 
 fn render_page(

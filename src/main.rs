@@ -465,6 +465,11 @@ impl eframe::App for TablaturesApp {
             });
         });
 
+        // Keep a blank line ready under the music: as soon as the last one is
+        // written on, the next appears. Not marked dirty -- the appended bars are
+        // empty scaffolding, and the invariant re-establishes itself on load.
+        strungin::layout::ensure_trailing_blank_system(&mut self.doc);
+
         // ponytail: re-paginated every frame rather than cached and invalidated on
         // edit -- simplest correct thing for a desktop editor's document sizes;
         // revisit with a dirty-flag cache if a very large score ever feels laggy.
