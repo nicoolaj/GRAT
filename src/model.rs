@@ -272,6 +272,16 @@ pub struct Document {
     pub capo: u8,
     #[serde(default = "default_tempo")]
     pub tempo: u16,
+    /// Vertical size of the tablature row: string spacing, fret numbers, click
+    /// targets and technique glyphs, all multiplied by this. 1.0 is the default;
+    /// bigger reads more easily, smaller saves height. Screen and PDF alike.
+    #[serde(default = "default_scale")]
+    pub tab_scale: f32,
+    /// Horizontal density of the music: every millimetre of note spacing in
+    /// `engrave` times this. Below 1.0 packs more bars onto a line (it feeds line
+    /// breaking); above 1.0 loosens sparse pieces. Shared by tablature and staff.
+    #[serde(default = "default_scale")]
+    pub note_spacing: f32,
     #[serde(default)]
     pub model: BlockModel,
     #[serde(default)]
@@ -286,6 +296,10 @@ fn default_tuning() -> [u8; 6] {
 
 fn default_tempo() -> u16 {
     120
+}
+
+fn default_scale() -> f32 {
+    1.0
 }
 
 impl Document {
@@ -316,6 +330,8 @@ impl Document {
             tuning: default_tuning(),
             capo: 0,
             tempo: default_tempo(),
+            tab_scale: default_scale(),
+            note_spacing: default_scale(),
             model: BlockModel::default(),
             staff_order: StaffOrder::default(),
             bars,

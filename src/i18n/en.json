@@ -29,6 +29,8 @@
   "field.author": "Author",
   "field.tempo": "Tempo",
   "field.capo": "Capo",
+  "field.tab_scale": "Tab size",
+  "field.note_spacing": "Note spacing",
   "model.one_line": "One line (tab only)",
   "model.two_line": "Two lines (tab + notation)",
   "model.three_line": "Three lines (tab + strum + notation)",

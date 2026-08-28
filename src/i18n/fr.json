@@ -29,6 +29,8 @@
   "field.author": "Auteur",
   "field.tempo": "Tempo",
   "field.capo": "Capodastre",
+  "field.tab_scale": "Taille tablature",
+  "field.note_spacing": "Espacement",
   "model.one_line": "Une ligne (tablature seule)",
   "model.two_line": "Deux lignes (tablature + portée)",
   "model.three_line": "Trois lignes (tablature + grattage + portée)",

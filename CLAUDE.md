@@ -101,10 +101,9 @@ never know about pages, egui or PDF.
   `egui::ColorImage::from_rgba_unmultiplied` for the About and help pages, and to the viewport icon.
   Downscale to ~256 px first with `image::imageops`: the full frame is 4 MB of RGBA for something
   drawn at a fraction of that.
-- The macOS icon pipeline is `sips -s format png -z N N src/assets/cover.jpg --out
-  icon.iconset/icon_NxN.png` for N in 16/32/128/256/512 plus their `@2x`, then
-  `iconutil -c icns icon.iconset`. Tested end to end; both tools ship with macOS, so `make app`
-  needs no extra install.
+- The macOS `.app` icon is `image.icns` at the repo root (hand-made, 1024×1024). `make app` just
+  copies it to `Contents/Resources/Strungin.icns` — `CFBundleIconFile` in the Info.plist is
+  `Strungin`, so the resource name must stay `Strungin.icns`.
 
 ## Recipes
 

@@ -503,6 +503,31 @@ impl eframe::App for TablaturesApp {
                     self.dirty = true;
                 }
                 ui.separator();
+                ui.label(t("field.tab_scale"));
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut self.doc.tab_scale)
+                            .range(0.7..=1.6)
+                            .speed(0.01)
+                            .max_decimals(2),
+                    )
+                    .changed()
+                {
+                    self.dirty = true;
+                }
+                ui.label(t("field.note_spacing"));
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut self.doc.note_spacing)
+                            .range(0.7..=1.4)
+                            .speed(0.01)
+                            .max_decimals(2),
+                    )
+                    .changed()
+                {
+                    self.dirty = true;
+                }
+                ui.separator();
                 egui::ComboBox::from_id_salt("block_model")
                     .selected_text(model_label(self.doc.model))
                     .show_ui(ui, |ui| {

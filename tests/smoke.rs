@@ -1,9 +1,7 @@
 //! Integration tests against the public `tablatures` crate API.
 
-use strungin::i18n;
-use strungin::layout;
 use strungin::model::{Bar, BlockModel, Document, Dur, Event, Note, NoteValue, Technique};
-use strungin::pdf;
+use strungin::{engrave, i18n, layout, pdf};
 
 #[test]
 fn pitch_resolves_tuning_fret_and_capo() {
@@ -105,6 +103,7 @@ fn old_json_without_new_fields_still_loads() {
     assert_eq!(doc.title, "Old Doc");
     assert_eq!(doc.tuning, [64, 59, 55, 50, 45, 40]);
     assert_eq!(doc.tempo, 120);
+    assert_eq!((doc.tab_scale, doc.note_spacing), (1.0, 1.0));
 }
 
 #[test]
@@ -185,6 +184,52 @@ fn page_count_grows_from_one_line_to_three_line() {
         "ThreeLine ({} pages) should need more pages than OneLine ({} pages)",
         three.len(),
         one.len()
+    );
+}
+
+#[test]
+fn denser_note_spacing_shrinks_the_system_and_fits_more_pages() {
+    let mut doc = doc_of_bars(60, BlockModel::OneLine);
+
+    // The natural (unjustified) system width scales linearly with note_spacing.
+    doc.note_spacing = 1.0;
+    let wide = engrave::system_spacing(&doc, 0..doc.bars.len(), None).width;
+    doc.note_spacing = 0.7;
+    let dense = engrave::system_spacing(&doc, 0..doc.bars.len(), None).width;
+    assert!(
+        (dense / wide - 0.7).abs() < 0.01,
+        "0.7x note spacing should give ~0.7x width, got {:.3}x",
+        dense / wide
+    );
+
+    // ...and that feeds line breaking, so the whole piece needs no more pages
+    // dense than wide (usually fewer).
+    doc.note_spacing = 1.0;
+    let wide_pages = layout::paginate(&doc).len();
+    doc.note_spacing = 0.7;
+    let dense_pages = layout::paginate(&doc).len();
+    assert!(
+        dense_pages <= wide_pages,
+        "denser spacing packs more bars per line: {dense_pages} vs {wide_pages} pages"
+    );
+}
+
+#[test]
+fn a_bigger_tab_scale_makes_taller_clickable_cells() {
+    let mut doc = doc_of_bars(6, BlockModel::OneLine);
+
+    doc.tab_scale = 1.0;
+    let base = layout::paginate(&doc);
+    let base_h = base[0].hits[0].max.y - base[0].hits[0].min.y;
+
+    doc.tab_scale = 1.5;
+    let big = layout::paginate(&doc);
+    let big_h = big[0].hits[0].max.y - big[0].hits[0].min.y;
+
+    assert!(
+        (big_h / base_h - 1.5).abs() < 0.01,
+        "1.5x tab scale should give ~1.5x cell height, got {:.3}x",
+        big_h / base_h
     );
 }
 

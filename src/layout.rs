@@ -88,13 +88,14 @@ pub fn paginate(doc: &Document) -> Vec<Page> {
 /// Greedy line breaking: bars pile onto a system while their natural width still
 /// fits, and every system gets at least one bar even if that one alone overflows.
 fn break_lines(doc: &Document, music_width: f32) -> Vec<Range<usize>> {
+    let h = doc.note_spacing;
     let mut systems = Vec::new();
     let mut i = 0;
     while i < doc.bars.len() {
-        let mut width = engrave::natural_bar_width(&doc.bars[i]);
+        let mut width = engrave::natural_bar_width(&doc.bars[i], h);
         let mut j = i + 1;
         while j < doc.bars.len() {
-            let w = engrave::natural_bar_width(&doc.bars[j]);
+            let w = engrave::natural_bar_width(&doc.bars[j], h);
             if width + w > music_width {
                 break;
             }
@@ -207,10 +208,10 @@ fn row_kinds(model: BlockModel) -> Vec<RowKind> {
 /// `tablature::render_strum` and `notation::render` exactly, so the block-height
 /// used for pagination and the per-row origins used for rendering can never drift
 /// apart: both are computed from this one function.
-fn row_extent(kind: RowKind, show_rhythm: bool) -> (f32, f32) {
+fn row_extent(kind: RowKind, show_rhythm: bool, tab_scale: f32) -> (f32, f32) {
     match kind {
         RowKind::Tab => (
-            tablature::STAFF_MM + tablature::BAND_MM,
+            tablature::staff_mm(tab_scale) + tablature::BAND_MM,
             if show_rhythm {
                 tablature::RHYTHM_MM
             } else {
@@ -230,7 +231,7 @@ fn block_height(doc: &Document) -> f32 {
     row_kinds(doc.model)
         .iter()
         .map(|&k| {
-            let (above, below) = row_extent(k, show_rhythm);
+            let (above, below) = row_extent(k, show_rhythm, doc.tab_scale);
             above + below
         })
         .sum()
@@ -258,7 +259,7 @@ fn place_block(
     let mut cursor = top;
     let mut tab_origin_y = None;
     for kind in order {
-        let (above, below) = row_extent(kind, show_rhythm);
+        let (above, below) = row_extent(kind, show_rhythm, doc.tab_scale);
         let origin_y = cursor - above;
         cursor = origin_y - below;
         let origin = P::new(x, origin_y);

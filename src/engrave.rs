@@ -17,14 +17,15 @@ pub const BAR_TRAIL_MM: f32 = 2.0;
 /// point the music overflows rather than becoming unreadable.
 pub const MIN_SQUEEZE: f32 = 0.6;
 
-/// Natural width in millimetres allotted to one event before justification.
+/// Natural width in millimetres allotted to one event before justification,
+/// scaled by `h` (the document's `note_spacing`: below 1.0 is denser).
 ///
 /// A duration table rather than a formula: it is trivially tunable by eye and the
 /// values below already read well at A4 print size.
 ///
 /// ponytail: linear table; switch to `w = k * ticks^0.6` if the visual density of
 /// mixed-duration bars ever needs finer control.
-pub fn natural_event_width(dur: &Dur) -> f32 {
+pub fn natural_event_width(dur: &Dur, h: f32) -> f32 {
     let base = match dur.base {
         NoteValue::Whole => 26.0,
         NoteValue::Half => 18.0,
@@ -33,18 +34,28 @@ pub fn natural_event_width(dur: &Dur) -> f32 {
         NoteValue::Sixteenth => 5.5,
         NoteValue::ThirtySecond => 4.0,
     };
-    base * (1.0 + 0.25 * dur.dots as f32)
+    base * (1.0 + 0.25 * dur.dots as f32) * h
 }
 
-/// Width a bar wants when nothing constrains it.
-pub fn natural_bar_width(bar: &Bar) -> f32 {
-    let events: f32 = bar.events.iter().map(|e| natural_event_width(&e.dur)).sum();
+/// Width a bar wants when nothing constrains it, at note spacing `h`. Every
+/// millimetre scales with `h` — the lead-in and trail too — so the identity
+/// `natural_bar_width == lead_in + Σ event widths + trail` that `system_spacing`
+/// relies on holds at any density.
+pub fn natural_bar_width(bar: &Bar, h: f32) -> f32 {
+    let events: f32 = bar
+        .events
+        .iter()
+        .map(|e| natural_event_width(&e.dur, h))
+        .sum();
     // An empty bar still needs to be visible and clickable.
-    let events = events.max(natural_event_width(&Dur {
-        base: NoteValue::Whole,
-        dots: 0,
-    }));
-    BAR_LEAD_IN_MM + events + BAR_TRAIL_MM
+    let events = events.max(natural_event_width(
+        &Dur {
+            base: NoteValue::Whole,
+            dots: 0,
+        },
+        h,
+    ));
+    (BAR_LEAD_IN_MM + BAR_TRAIL_MM) * h + events
 }
 
 /// Horizontal placement of one bar inside a system. All values are millimetres
@@ -94,10 +105,11 @@ pub fn system_spacing(
     bars: std::ops::Range<usize>,
     target_width_mm: Option<f32>,
 ) -> Spacing {
+    let h = doc.note_spacing;
     let natural: f32 = bars
         .clone()
         .filter_map(|i| doc.bars.get(i))
-        .map(natural_bar_width)
+        .map(|bar| natural_bar_width(bar, h))
         .sum();
 
     let scale = match target_width_mm {
@@ -111,12 +123,12 @@ pub fn system_spacing(
         let Some(bar) = doc.bars.get(index) else {
             continue;
         };
-        let width = natural_bar_width(bar) * scale;
-        let mut cursor = x + BAR_LEAD_IN_MM * scale;
+        let width = natural_bar_width(bar, h) * scale;
+        let mut cursor = x + BAR_LEAD_IN_MM * h * scale;
         let mut events = Vec::with_capacity(bar.events.len());
         for event in &bar.events {
             events.push(cursor);
-            cursor += natural_event_width(&event.dur) * scale;
+            cursor += natural_event_width(&event.dur, h) * scale;
         }
         out.push(BarSpacing {
             index,
