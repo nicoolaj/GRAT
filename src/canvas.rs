@@ -8,7 +8,7 @@
 use eframe::egui;
 use strungin::layout::Page;
 use strungin::model::{Document, NoteValue, Strum, Technique};
-use strungin::{i18n::t, model, staff, tablature, Align, Prim, PAGE_H_MM, PAGE_W_MM};
+use strungin::{engrave, i18n::t, model, staff, tablature, Align, Prim, PAGE_H_MM, PAGE_W_MM};
 
 /// Visual gap between stacked pages on screen. Screen-only: has no equivalent in
 /// the printed layout, where every page is its own sheet of paper.
@@ -35,6 +35,10 @@ pub struct EditorState {
     pub tool_tech: Technique,
     /// Note value (with dots) applied to the selected event when clicked.
     pub tool_value: model::Dur,
+    /// Whether an explicit duration change (the palette's value and dot widgets)
+    /// pushes the rest of the piece forward instead of absorbing locally. Digit
+    /// entry ignores this -- see the comment in `handle_digit`.
+    pub shift_following: bool,
     /// Armed value for Bend / Bend-and-release / Pre-bend.
     pub bend_quarters: u8,
     /// Armed value for Trill.
@@ -57,6 +61,7 @@ impl Default for EditorState {
                 base: NoteValue::Quarter,
                 dots: 0,
             },
+            shift_following: false,
             bend_quarters: 2,
             trill_to_fret: 0,
             digit_buffer: String::new(),
@@ -346,12 +351,23 @@ fn handle_digit(state: &mut EditorState, doc: &mut Document, digit: u32, now: f6
     };
 
     let tech = state.tool_tech;
+    let value = state.tool_value;
     mutate(state, doc, move |doc| {
-        let Some(event) = doc
-            .bars
-            .get_mut(sel.bar)
-            .and_then(|b| b.events.get_mut(sel.event))
-        else {
+        let sig = doc.time_sig_at(sel.bar); // read before the &mut below -- borrowck
+        let Some(bar) = doc.bars.get_mut(sel.bar) else {
+            return;
+        };
+        // The armed value only takes hold on an empty cell: correcting a fret or
+        // stacking a string onto an existing chord must not shorten what is
+        // already written. Entry always absorbs locally here (never
+        // `shift_event_dur`, regardless of `state.shift_following`): placing a
+        // note in a rest isn't "changing an existing note's timing", and
+        // shifting the whole piece on every typed fret would make entry
+        // unusable.
+        if bar.events.get(sel.event).is_some_and(|e| e.is_rest()) {
+            engrave::set_event_dur(bar, sig, sel.event, value);
+        }
+        let Some(event) = bar.events.get_mut(sel.event) else {
             return;
         };
         match event.notes.iter_mut().find(|n| n.string == sel.string) {
@@ -594,6 +610,23 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     let mut action = None;
     let sel = state.selected;
 
+    // How the two duration widgets below behave when they change an existing
+    // event: absorb locally (default) or push the rest of the piece forward.
+    ui.horizontal(|ui| {
+        if ui
+            .selectable_label(state.shift_following, t("tool.shift_following"))
+            .clicked()
+        {
+            state.shift_following = true;
+        }
+        if ui
+            .selectable_label(!state.shift_following, t("tool.keep_following"))
+            .clicked()
+        {
+            state.shift_following = false;
+        }
+    });
+
     ui.label(t("tool.value"));
     ui.horizontal_wrapped(|ui| {
         for v in [
@@ -611,13 +644,19 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
             {
                 state.tool_value.base = v;
                 if let Some(sel) = sel {
+                    let sig = doc.time_sig_at(sel.bar);
+                    let dots = doc
+                        .bars
+                        .get(sel.bar)
+                        .and_then(|b| b.events.get(sel.event))
+                        .map_or(0, |e| e.dur.dots);
+                    let shift_following = state.shift_following;
                     mutate(state, doc, move |doc| {
-                        if let Some(event) = doc
-                            .bars
-                            .get_mut(sel.bar)
-                            .and_then(|b| b.events.get_mut(sel.event))
-                        {
-                            event.dur.base = v;
+                        let dur = model::Dur { base: v, dots };
+                        if shift_following {
+                            engrave::shift_event_dur(doc, sel.bar, sel.event, dur);
+                        } else if let Some(bar) = doc.bars.get_mut(sel.bar) {
+                            engrave::set_event_dur(bar, sig, sel.event, dur);
                         }
                     });
                     action = Some(Action::Changed);
@@ -633,13 +672,19 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         {
             let dots = state.tool_value.dots;
             if let Some(sel) = sel {
+                let sig = doc.time_sig_at(sel.bar);
+                let base = doc
+                    .bars
+                    .get(sel.bar)
+                    .and_then(|b| b.events.get(sel.event))
+                    .map_or(NoteValue::default(), |e| e.dur.base);
+                let shift_following = state.shift_following;
                 mutate(state, doc, move |doc| {
-                    if let Some(event) = doc
-                        .bars
-                        .get_mut(sel.bar)
-                        .and_then(|b| b.events.get_mut(sel.event))
-                    {
-                        event.dur.dots = dots;
+                    let dur = model::Dur { base, dots };
+                    if shift_following {
+                        engrave::shift_event_dur(doc, sel.bar, sel.event, dur);
+                    } else if let Some(bar) = doc.bars.get_mut(sel.bar) {
+                        engrave::set_event_dur(bar, sig, sel.event, dur);
                     }
                 });
                 action = Some(Action::Changed);
@@ -889,9 +934,126 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     }
 
     ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(t("bar.time_sig"));
+        let valid_bar = bar_idx.filter(|&b| b < doc.bars.len());
+        let current = valid_bar.and_then(|b| doc.bars[b].time_sig);
+        let label = match (valid_bar, current) {
+            (_, Some(sig)) => format!("{}/{}", sig.0, sig.1),
+            (Some(b), None) => {
+                let (num, den) = doc.time_sig_at(b);
+                format!("{} ({num}/{den})", t("bar.time_sig_inherit"))
+            }
+            (None, None) => t("bar.time_sig_inherit"),
+        };
+        ui.add_enabled_ui(valid_bar.is_some(), |ui| {
+            egui::ComboBox::from_id_salt("bar_time_sig")
+                .selected_text(label)
+                .show_ui(ui, |ui| {
+                    let b = valid_bar.unwrap_or(0);
+                    if ui
+                        .add_enabled(
+                            b != 0,
+                            egui::Button::selectable(current.is_none(), t("bar.time_sig_inherit")),
+                        )
+                        .clicked()
+                    {
+                        mutate(state, doc, move |doc| engrave::set_time_sig(doc, b, None));
+                        action = Some(Action::Changed);
+                    }
+                    // ponytail: fixed list; a num/den pair if someone asks for 13/16.
+                    for sig in [
+                        (2u8, 4u8),
+                        (3, 4),
+                        (4, 4),
+                        (5, 4),
+                        (6, 8),
+                        (7, 8),
+                        (9, 8),
+                        (12, 8),
+                        (2, 2),
+                    ] {
+                        if ui
+                            .selectable_label(current == Some(sig), format!("{}/{}", sig.0, sig.1))
+                            .clicked()
+                        {
+                            mutate(state, doc, move |doc| {
+                                engrave::set_time_sig(doc, b, Some(sig))
+                            });
+                            action = Some(Action::Changed);
+                        }
+                    }
+                });
+        });
+    });
+
+    ui.separator();
     if ui.button(t("tool.undo")).clicked() && undo(state, doc) {
         action = Some(Action::Changed);
     }
 
     action
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handle_digit_arms_the_tool_value_on_an_empty_cell() {
+        let mut doc = Document::new_empty();
+        let mut state = EditorState {
+            selected: Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 0,
+            }),
+            tool_value: model::Dur {
+                base: NoteValue::Eighth,
+                dots: 0,
+            },
+            ..Default::default()
+        };
+        assert!(handle_digit(&mut state, &mut doc, 5, 0.0));
+        let bar = &doc.bars[0];
+        assert_eq!(bar.events[0].dur.base, NoteValue::Eighth);
+        assert_eq!(bar.events[0].notes[0].fret, 5);
+        assert!(
+            bar.events[1].is_rest() && bar.events[1].dur.base == NoteValue::Eighth,
+            "the freed time becomes its own eighth rest"
+        );
+        assert!(engrave::is_complete(bar, (4, 4)));
+    }
+
+    #[test]
+    fn handle_digit_leaves_duration_alone_on_an_occupied_cell() {
+        let mut doc = Document::new_empty();
+        doc.bars[0].events[0].notes.push(model::Note {
+            string: 0,
+            fret: 2,
+            tech: Technique::Plain,
+            tie_next: false,
+        });
+        let original_dur = doc.bars[0].events[0].dur;
+        let mut state = EditorState {
+            selected: Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 0,
+            }),
+            tool_value: model::Dur {
+                base: NoteValue::Eighth,
+                dots: 0,
+            },
+            ..Default::default()
+        };
+        assert!(handle_digit(&mut state, &mut doc, 7, 0.0));
+        let bar = &doc.bars[0];
+        assert_eq!(
+            bar.events[0].dur, original_dur,
+            "correcting a fret must not touch duration"
+        );
+        assert_eq!(bar.events[0].notes[0].fret, 7);
+        assert_eq!(bar.events.len(), 4, "no rest was inserted");
+    }
 }

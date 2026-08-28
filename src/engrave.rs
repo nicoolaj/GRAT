@@ -7,7 +7,7 @@
 //! The spacing computed here is shared by all three rows of a block (tablature,
 //! strum row, notation staff), which is what keeps them vertically aligned.
 
-use crate::model::{Bar, Document, Dur, NoteValue};
+use crate::model::{Bar, Document, Dur, Event, NoteValue};
 
 /// Horizontal room reserved after a barline before the first event.
 pub const BAR_LEAD_IN_MM: f32 = 2.5;
@@ -187,6 +187,227 @@ pub fn onsets(bar: &Bar) -> Vec<u32> {
 /// warning in the editor, never as an error: half-written bars are normal while typing.
 pub fn is_complete(bar: &Bar, time_sig: (u8, u8)) -> bool {
     bar.events.iter().map(|e| e.dur.ticks()).sum::<u32>() == bar_ticks(time_sig)
+}
+
+/// Six undotted note values, longest first — the basis `split_ticks` is greedy over.
+const SPLITTABLE: [NoteValue; 6] = [
+    NoteValue::Whole,
+    NoteValue::Half,
+    NoteValue::Quarter,
+    NoteValue::Eighth,
+    NoteValue::Sixteenth,
+    NoteValue::ThirtySecond,
+];
+
+/// Break `ticks` into the fewest printable (undotted) durations, longest first.
+///
+/// Stops as soon as no value fits what remains, rather than looping forever: a
+/// remainder under one thirty-second (120 ticks -- e.g. 225 left over, which only
+/// a triple-dotted value could name) isn't representable at all, so it is dropped.
+/// The caller ends up a few ticks short, which the existing incomplete-bar warning
+/// already surfaces.
+///
+/// ponytail: greedy and not beat-aware, so a rest can straddle a beat; split at
+/// beat boundaries too if a misplaced rest is ever visible enough in print.
+pub fn split_ticks(ticks: u32) -> Vec<Dur> {
+    let mut out = Vec::new();
+    let mut remaining = ticks;
+    while let Some(base) = SPLITTABLE.iter().copied().find(|v| v.ticks() <= remaining) {
+        remaining -= base.ticks();
+        out.push(Dur { base, dots: 0 });
+    }
+    out
+}
+
+/// Change event `index`'s duration to `dur`, keeping the bar's total exactly at
+/// `bar_ticks(time_sig)`. Shortening backfills the freed time with rests right
+/// after the event; lengthening consumes the events that follow, dropping any
+/// whose notes are fully swallowed and trimming the one that only partly is.
+///
+/// Nothing at or before `index` is ever inserted or removed, so a caller's
+/// selection by index stays valid across the call.
+pub fn set_event_dur(bar: &mut Bar, time_sig: (u8, u8), index: usize, dur: Dur) {
+    let Some(&start) = onsets(bar).get(index) else {
+        return;
+    };
+    let room = bar_ticks(time_sig).saturating_sub(start);
+    let target = if dur.ticks() <= room {
+        dur
+    } else {
+        // ponytail: bounded at the bar line; a tie across it (out of scope for v1)
+        // would let this overflow instead of clamping.
+        match split_ticks(room).first() {
+            Some(&fit) => fit,
+            None => return,
+        }
+    };
+
+    let old_ticks = bar.events[index].dur.ticks();
+    bar.events[index].dur = target;
+    let new_ticks = target.ticks();
+
+    if new_ticks < old_ticks {
+        let rests = split_ticks(old_ticks - new_ticks)
+            .into_iter()
+            .map(|dur| Event {
+                dur,
+                ..Default::default()
+            });
+        bar.events.splice(index + 1..index + 1, rests);
+    } else if new_ticks > old_ticks {
+        let mut spare = new_ticks - old_ticks;
+        let i = index + 1; // stays put: a removal shifts the next event into i itself
+        while spare > 0 && i < bar.events.len() {
+            let covered = bar.events[i].dur.ticks();
+            if covered <= spare {
+                bar.events.remove(i); // fully swallowed, including whatever notes it had
+                spare -= covered;
+            } else {
+                let rests: Vec<Event> = split_ticks(covered - spare)
+                    .into_iter()
+                    .map(|dur| Event {
+                        dur,
+                        ..Default::default()
+                    })
+                    .collect();
+                bar.events.splice(i..i + 1, rests);
+                spare = 0;
+            }
+        }
+    }
+}
+
+/// Change event `index`'s duration, then push everything that follows -- the rest
+/// of the bar, then later bars -- forward without losing anything: the document
+/// gains a bar rather than dropping an event. Unlike [`set_event_dur`], nothing
+/// after `index` is trimmed or swallowed: the whole tail from `bar_index` onward
+/// is re-split from scratch around the new duration.
+///
+/// `index` itself never moves (nothing before it is touched), so a caller's
+/// selection by `(bar_index, index)` stays valid across the call.
+pub fn shift_event_dur(doc: &mut Document, bar_index: usize, index: usize, dur: Dur) {
+    let Some(event) = doc
+        .bars
+        .get_mut(bar_index)
+        .and_then(|b| b.events.get_mut(index))
+    else {
+        return;
+    };
+    event.dur = dur;
+
+    // Pull every event from `bar_index` on into an owned queue: draining (not
+    // cloning) releases the borrow on `doc.bars` before it's rebuilt below, and
+    // owning the events, not just their durations, carries fretting, technique
+    // and strum along for free.
+    let original_len = doc.bars.len();
+    let mut stream: std::collections::VecDeque<Event> = doc.bars[bar_index..]
+        .iter_mut()
+        .flat_map(|b| std::mem::take(&mut b.events))
+        .collect();
+
+    let mut i = bar_index;
+    while !stream.is_empty() {
+        if i == doc.bars.len() {
+            // The stream outgrew the document -- grow it rather than lose a note.
+            doc.bars.push(Bar::default());
+        }
+        let cap = bar_ticks(doc.time_sig_at(i)); // read before the &mut below -- borrowck
+        let mut events = Vec::new();
+        let mut total = 0u32;
+        while let Some(mut e) = stream.pop_front() {
+            let room = cap.saturating_sub(total);
+            let ticks = e.dur.ticks();
+            if ticks <= room {
+                total += ticks;
+                events.push(e);
+            } else if total == 0 {
+                // An event longer than a whole bar (a whole note pushed into a
+                // 3/4 bar) would never fit anywhere, so without clamping it the
+                // loop above would never terminate. Bound it exactly as
+                // `set_event_dur` bounds an overlong duration at a bar line.
+                // ponytail: the excess is dropped rather than tied into the next
+                // bar -- see `notation::ties`'s ponytail, which only connects
+                // two events within the same bar. Splitting this into two tied
+                // notes needs ties across a barline (out of scope for v1);
+                // printing two repeated notes without a tie would be a
+                // rhythmic lie worse than the drop.
+                e.dur = split_ticks(cap).first().copied().unwrap_or(e.dur);
+                total += e.dur.ticks();
+                events.push(e);
+            } else {
+                // Never split an event across a bar line: it starts the next
+                // bar instead, and the room left here becomes a rest.
+                stream.push_front(e);
+                break;
+            }
+        }
+        if total < cap {
+            events.extend(split_ticks(cap - total).into_iter().map(|dur| Event {
+                dur,
+                ..Default::default()
+            }));
+        }
+        doc.bars[i].events = events;
+        i += 1;
+    }
+
+    // Bars the stream never reached were drained empty above; give them back one
+    // rest per beat (clickable cells) instead of leaving them silent.
+    for j in i..original_len {
+        let sig = doc.time_sig_at(j);
+        doc.bars[j].events = Bar::new_empty(Some(sig)).events;
+    }
+}
+
+/// Bring a bar's total back to exactly `bar_ticks(time_sig)`: the first event that
+/// would overrun the bar is shrunk to what still fits (or dropped if nothing
+/// does), everything after it is replaced by rests, and a bar left short is
+/// padded the same way.
+pub fn refit(bar: &mut Bar, time_sig: (u8, u8)) {
+    let cap = bar_ticks(time_sig);
+    let mut total = 0u32;
+    for i in 0..bar.events.len() {
+        let ticks = bar.events[i].dur.ticks();
+        if total + ticks <= cap {
+            total += ticks;
+            continue;
+        }
+        let room = cap - total;
+        match split_ticks(room).into_iter().next() {
+            Some(fit) => {
+                bar.events[i].dur = fit;
+                total += fit.ticks();
+                bar.events.truncate(i + 1);
+            }
+            None => bar.events.truncate(i),
+        }
+        break;
+    }
+    if total < cap {
+        bar.events
+            .extend(split_ticks(cap - total).into_iter().map(|dur| Event {
+                dur,
+                ..Default::default()
+            }));
+    }
+}
+
+/// Set bar `bar_index`'s time signature (`None` reverts to inheriting from
+/// whatever came before) and refit it and every bar it governs, stopping at the
+/// next bar that names its own signature.
+pub fn set_time_sig(doc: &mut Document, bar_index: usize, sig: Option<(u8, u8)>) {
+    let Some(bar) = doc.bars.get_mut(bar_index) else {
+        return;
+    };
+    bar.time_sig = sig;
+
+    for i in bar_index..doc.bars.len() {
+        if i > bar_index && doc.bars[i].time_sig.is_some() {
+            break; // that bar starts its own section
+        }
+        let effective = doc.time_sig_at(i); // read before the &mut below -- borrowck
+        refit(&mut doc.bars[i], effective);
+    }
 }
 
 /// A run of events joined by beams.
