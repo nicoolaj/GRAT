@@ -463,3 +463,175 @@ fn pdf_export_handles_harmonic_and_ghost_labels_without_panicking() {
     let bytes = pdf::export(&doc);
     assert!(bytes.starts_with(b"%PDF-"));
 }
+
+// --- engrave::for_export: rest consolidation and trailing-bar trim -----------
+
+fn q_note(string: u8) -> Event {
+    Event {
+        dur: Dur {
+            base: NoteValue::Quarter,
+            dots: 0,
+        },
+        notes: vec![Note {
+            string,
+            fret: 2,
+            tech: Technique::Plain,
+            tie_next: false,
+        }],
+        ..Default::default()
+    }
+}
+
+fn beat_rest(base: NoteValue) -> Event {
+    Event {
+        dur: Dur { base, dots: 0 },
+        ..Default::default()
+    }
+}
+
+#[test]
+fn for_export_collapses_a_blank_bar_to_one_whole_rest_and_keeps_only_one() {
+    // A fresh document is eight bars of four quarter rests each. Export keeps one
+    // bar (the trim floor) and writes its silence as a single whole rest.
+    let out = engrave::for_export(&Document::new_empty());
+    assert_eq!(out.bars.len(), 1, "trailing blank bars drop, one is kept");
+    assert_eq!(out.bars[0].events.len(), 1, "four beat rests merge to one");
+    assert_eq!(out.bars[0].events[0].dur.base, NoteValue::Whole);
+    assert!(out.bars[0].events[0].is_rest());
+}
+
+#[test]
+fn for_export_drops_blank_bars_after_the_last_sounded_note() {
+    let mut doc = Document::new_empty();
+    doc.bars[0].events[0] = q_note(0);
+    let out = engrave::for_export(&doc);
+    assert_eq!(out.bars.len(), 1, "only bar 0 sounds a note");
+    assert!(!out.bars[0].events[0].is_rest());
+}
+
+#[test]
+fn for_export_keeps_a_blank_bar_that_sits_inside_the_music() {
+    let mut doc = Document::new_empty();
+    doc.bars.truncate(3);
+    doc.bars[0].events[0] = q_note(0);
+    doc.bars[2].events[0] = q_note(0); // bar 1 stays blank, between two sounded bars
+    let out = engrave::for_export(&doc);
+    assert_eq!(
+        out.bars.len(),
+        3,
+        "an inner blank bar is not a trailing one"
+    );
+    assert_eq!(
+        out.bars[1].events.len(),
+        1,
+        "it is still merged to a whole rest"
+    );
+    assert_eq!(out.bars[1].events[0].dur.base, NoteValue::Whole);
+}
+
+#[test]
+fn for_export_merges_sub_beat_rests_without_crossing_a_beat() {
+    let mut doc = Document::new_empty();
+    doc.bars.truncate(1);
+    doc.bars[0].events = vec![
+        q_note(0),
+        beat_rest(NoteValue::Eighth),
+        beat_rest(NoteValue::Eighth), // both halves of beat 2
+        q_note(1),
+        q_note(2),
+    ];
+    let out = engrave::for_export(&doc);
+    let shape: Vec<(NoteValue, bool)> = out.bars[0]
+        .events
+        .iter()
+        .map(|e| (e.dur.base, e.is_rest()))
+        .collect();
+    assert_eq!(
+        shape,
+        vec![
+            (NoteValue::Quarter, false),
+            (NoteValue::Quarter, true), // the two eighth rests, now one quarter rest
+            (NoteValue::Quarter, false),
+            (NoteValue::Quarter, false),
+        ]
+    );
+}
+
+#[test]
+fn for_export_leaves_a_multi_beat_rest_run_as_one_rest_per_beat() {
+    // ponytail ceiling: two silent beats print as two quarter rests, not a half.
+    let mut doc = Document::new_empty();
+    doc.bars.truncate(1);
+    doc.bars[0].events = vec![
+        Event {
+            dur: Dur {
+                base: NoteValue::Half,
+                dots: 0,
+            },
+            notes: vec![Note {
+                string: 0,
+                fret: 2,
+                tech: Technique::Plain,
+                tie_next: false,
+            }],
+            ..Default::default()
+        },
+        beat_rest(NoteValue::Quarter),
+        beat_rest(NoteValue::Quarter),
+    ];
+    let out = engrave::for_export(&doc);
+    let rests: Vec<NoteValue> = out.bars[0]
+        .events
+        .iter()
+        .filter(|e| e.is_rest())
+        .map(|e| e.dur.base)
+        .collect();
+    assert_eq!(rests, vec![NoteValue::Quarter, NoteValue::Quarter]);
+}
+
+#[test]
+fn for_export_is_idempotent() {
+    let mut doc = doc_of_bars(6, BlockModel::OneLine);
+    doc.bars[2].events = vec![
+        q_note(0),
+        beat_rest(NoteValue::Eighth),
+        beat_rest(NoteValue::Eighth),
+        q_note(1),
+        q_note(2),
+    ];
+    doc.bars.push(Bar::new_empty(None)); // a trailing blank to trim on the first pass
+    let once = engrave::for_export(&doc);
+    let twice = engrave::for_export(&once);
+    assert_eq!(once, twice, "a second pass must change nothing");
+}
+
+#[test]
+fn pdf_export_does_not_print_trailing_blank_bars() {
+    // One page of music, then enough blank bars to fill more pages on their own.
+    // The blank tail must never reach the paper.
+    let mut doc = doc_of_bars(6, BlockModel::OneLine);
+    assert_eq!(
+        layout::paginate(&doc).len(),
+        1,
+        "fixture must be one page of music"
+    );
+    for _ in 0..400 {
+        doc.bars.push(Bar::new_empty(None));
+    }
+    assert!(
+        layout::paginate(&doc).len() >= 2,
+        "the blank tail alone spills past page one"
+    );
+
+    let bytes = pdf::export(&doc);
+    assert!(bytes.starts_with(b"%PDF-"));
+    let mut warnings = Vec::new();
+    let parsed =
+        printpdf::PdfDocument::parse(&bytes, &printpdf::PdfParseOptions::default(), &mut warnings)
+            .expect("exported bytes must parse back as a PDF");
+    assert_eq!(
+        parsed.pages.len(),
+        1,
+        "trailing blank bars must not add printed pages"
+    );
+}

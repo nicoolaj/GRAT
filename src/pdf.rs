@@ -9,6 +9,7 @@ use printpdf::{
     WindingOrder,
 };
 
+use crate::engrave;
 use crate::layout::{self, Page};
 use crate::model::Document;
 use crate::{staff, Align, Prim, Rgb, P, PAGE_H_MM, PAGE_W_MM};
@@ -17,7 +18,11 @@ use crate::{staff, Align, Prim, Rgb, P, PAGE_H_MM, PAGE_W_MM};
 /// same call `canvas.rs` makes every frame), then a direct `Prim` -> `Op`
 /// translation, one `PdfPage` per `layout::Page`.
 pub fn export(doc: &Document) -> Vec<u8> {
-    let pages: Vec<PdfPage> = layout::paginate(doc)
+    // The editor's scattered one-per-beat rests and its trailing blank bars are a
+    // convenience while writing; a finished score wants merged rests and no empty
+    // tail. This never touches the document the editor renders.
+    let doc = engrave::for_export(doc);
+    let pages: Vec<PdfPage> = layout::paginate(&doc)
         .iter()
         .map(|page| PdfPage::new(Mm(PAGE_W_MM), Mm(PAGE_H_MM), page_ops(page)))
         .collect();

@@ -469,6 +469,100 @@ pub fn set_time_sig(doc: &mut Document, bar_index: usize, sig: Option<(u8, u8)>)
     }
 }
 
+/// Normalise a document for printing: the editor's convenient one-rest-per-beat
+/// "blank beat" becomes the rests a finished score is actually written with, and
+/// whole empty bars trailing the music are dropped.
+///
+/// Pure — the returned document is what `pdf::export` lays out; the editor keeps
+/// rendering the original, where scattered single-beat rests are the point.
+pub fn for_export(doc: &Document) -> Document {
+    let mut doc = doc.clone();
+
+    // Right-trim: drop whole bars past the last one that sounds a note. Keep at
+    // least one so an all-rest piece still prints a staff, and leave mid-piece
+    // blank bars alone -- only the tail goes.
+    //
+    // ponytail: a trimmed bar's `repeat_end` / `time_sig` override goes with it.
+    // In practice the only blank bars at the end are the ones the editor grows
+    // (`layout::ensure_trailing_blank_system`), which carry neither.
+    while doc.bars.len() > 1
+        && doc
+            .bars
+            .last()
+            .is_some_and(|b| b.events.iter().all(Event::is_rest))
+    {
+        doc.bars.pop();
+    }
+
+    for i in 0..doc.bars.len() {
+        let sig = doc.time_sig_at(i); // read before the &mut below -- borrowck
+        merge_bar_rests(&mut doc.bars[i], sig);
+    }
+
+    doc
+}
+
+/// Rewrite `bar.events` so runs of consecutive rests read the way a score is
+/// written: a single whole rest for a wholly silent bar, otherwise the rest run
+/// broken at beat boundaries. Notes pass through untouched.
+fn merge_bar_rests(bar: &mut Bar, time_sig: (u8, u8)) {
+    let cap = bar_ticks(time_sig);
+    let beat = beat_ticks(time_sig).max(1);
+
+    // A bar that is nothing but rests adding up to a full measure is one whole
+    // rest, whatever the metre -- exactly how notation shows an untouched bar.
+    if !bar.events.is_empty()
+        && bar.events.iter().all(Event::is_rest)
+        && bar.events.iter().map(|e| e.dur.ticks()).sum::<u32>() == cap
+    {
+        bar.events = vec![Event {
+            dur: Dur {
+                base: NoteValue::Whole,
+                dots: 0,
+            },
+            ..Default::default()
+        }];
+        return;
+    }
+
+    let mut out: Vec<Event> = Vec::with_capacity(bar.events.len());
+    let mut t = 0u32; // onset of the event under the cursor
+    let mut run_start: Option<u32> = None; // onset of the current rest run, if any
+    for event in &bar.events {
+        if event.is_rest() {
+            run_start.get_or_insert(t);
+        } else {
+            if let Some(start) = run_start.take() {
+                emit_rests(start, t, beat, &mut out);
+            }
+            out.push(event.clone());
+        }
+        t += event.dur.ticks();
+    }
+    if let Some(start) = run_start.take() {
+        emit_rests(start, t, beat, &mut out);
+    }
+    bar.events = out;
+}
+
+/// Fill `[from, to)` with rests, split at every beat boundary so none straddles a
+/// beat, each beat-aligned piece named by the fewest values `split_ticks` allows.
+///
+/// ponytail: a multi-beat run that is not a whole bar comes out as one rest per
+/// beat -- no half / dotted-half grouping. Switch to beat-unit grouping (Gould,
+/// "Behind Bars") if that ever reads as too fussy in print.
+fn emit_rests(from: u32, to: u32, beat: u32, out: &mut Vec<Event>) {
+    let mut a = from;
+    while a < to {
+        let b = ((a / beat + 1) * beat).min(to); // end of a's beat, clamped to `to`
+        out.extend(split_ticks(b - a).into_iter().map(|dur| Event {
+            dur,
+            ..Default::default()
+        }));
+        a = b;
+    }
+}
+
 /// A run of events joined by beams.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BeamGroup {
