@@ -21,6 +21,11 @@ make examples  # regenerate exemples/*.pdf
 Verify with `cargo build`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`.
 All four must be clean before a commit.
 
+**End of every iteration: bump the version and tag it.** Raise `version` in `Cargo.toml`
+(semver: patch for a fix, minor for a feature, major for a break), commit that bump, then
+`git tag vX.Y.Z` on the same commit with the matching number. The tag and `Cargo.toml` must
+always agree. No iteration is finished — and no work is handed back — without both.
+
 ## The one architectural idea
 
 **The page is laid out once, in millimetres, and rendered twice.** `layout.rs` turns a `Document`
@@ -40,7 +45,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `engrave.rs` | rhythm only: beat grouping, beams, proportional spacing, justification. No pitch, no glyphs |
 | `staff.rs` | furniture both rows share: barlines and repeats, rests, arrowheads, waves, text metrics |
 | `notation.rs` | the five-line staff: clef, heads, stems, beams, accidentals, ties, ledger lines |
-| `tablature.rs` | the tablature row: string lines, fret labels, all 17 technique glyphs, strum row, rhythm stems |
+| `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs, strum row, rhythm stems |
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, hit boxes |
 | `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette |
 | `pdf.rs` | `Prim` → printpdf ops |
@@ -104,6 +109,18 @@ never know about pages, egui or PDF.
 - The macOS `.app` icon is `image.icns` at the repo root (hand-made, 1024×1024). `make app` just
   copies it to `Contents/Resources/Strungin.icns` — `CFBundleIconFile` in the Info.plist is
   `Strungin`, so the resource name must stay `Strungin.icns`.
+- **`muda` (native macOS menu bar) was tried and reverted — do not retry without checking upstream
+  first.** muda 0.19.3's custom `NSMenuItem` subclass (`MudaMenuItem`) stores a raw pointer
+  (`#[ivars = Cell<*const MenuChild>]`) to its Rust-side data instead of an owned/reference-counted
+  handle — muda's own source marks this `// FIXME: Use Rc or something else to access the
+  MenuChild.`. Clicking any custom (non-predefined) menu item — File > Open in particular —
+  dereferenced that pointer and crashed the process (SIGABRT, uncaught NSException, confirmed via
+  `log show` pinpointing the abort to the exact instant AppKit dispatched the click). 0.19.3 is the
+  newest release (checked crates.io); no fix exists to upgrade to. `PredefinedMenuItem`-based items
+  (Hide, Minimize, Close, Quit, etc.) don't go through that code path and were not observed to
+  crash, but the app's own actions (New, Open, Save, Undo, switching the block model...) all need
+  custom items, which is most of the menu. Reverted to `egui::Panel::top` + `egui::MenuBar` on every
+  platform, including macOS — see `TablaturesApp::egui_menu_bar` in `main.rs`.
 
 ## Recipes
 

@@ -22,7 +22,7 @@ pub const STAFF_MM: f32 = 5.0 * STRING_MM;
 /// Band above the staff: bends, vibrato, slurs, palm-mute spans, labels.
 ///
 /// ponytail: `tab_scale` grows the technique glyphs drawn in this band but not
-/// the band itself, so past ~1.35 a bend label pokes ~1 mm above it — absorbed by
+/// the band itself, so past ~1.04 a bend label pokes ~1 mm above it — absorbed by
 /// `BLOCK_GAP_MM` between stacked blocks. Grow `BAND_MM` with `tab_scale` if that
 /// ever shows.
 pub const BAND_MM: f32 = 8.0;
@@ -36,6 +36,22 @@ pub const HEAD_MM: f32 = 13.0;
 const LINE_W: f32 = 0.22;
 const FRET_CAP_MM: f32 = 2.0;
 const HIT_HALF_MM: f32 = 2.2;
+
+/// What `Document::tab_scale == 1.0` draws, as a multiplier on every millimetre
+/// figure in this file.
+///
+/// The standard size moved to what used to be `tab_scale = 1.3`. Every glyph in
+/// here is built from hand-tuned literals fed through `sc()`, and they are checked
+/// by eye, not by assertion — folding the move into one multiplier keeps that set
+/// of numbers intact and self-consistent instead of rescaling forty of them by
+/// hand and hoping nothing drifted. Contrast `engrave::natural_event_width`, which
+/// is a six-value table and so was retuned outright.
+const SCALE_BASE: f32 = 1.3;
+
+/// The multiplier the renderer applies for this document.
+fn scale(doc: &Document) -> f32 {
+    doc.tab_scale * SCALE_BASE
+}
 
 /// A tablature row shows the rhythm itself when no notation staff is there to
 /// carry it — otherwise the block would say which frets to play but never when.
@@ -164,14 +180,19 @@ pub fn render(
     }
 }
 
-/// The stacked "TAB" that opens a tablature staff.
+/// The stacked "TAB" that opens a tablature staff, centred on the staff mid-line.
 fn tab_label(x: f32, y0: f32, out: &mut Vec<Prim>) {
-    let pt = pt_for_cap(2.6);
+    const CAP: f32 = 2.6;
+    const GAP: f32 = 3.4; // baseline to baseline
+    let pt = pt_for_cap(CAP);
+    // `pos.y` is the baseline; the stack runs from B's baseline up to T's cap
+    // top. Put that span's centre on the staff's own centre.
+    let bottom_baseline = y0 + STAFF_MM * 0.5 - GAP - CAP * 0.5;
     for (i, letter) in ["T", "A", "B"].iter().enumerate() {
         out.push(Prim::Text {
             pos: P {
                 x,
-                y: y0 + STAFF_MM - 4.0 - i as f32 * 3.4,
+                y: bottom_baseline + (2 - i) as f32 * GAP,
             },
             s: (*letter).to_string(),
             pt,
@@ -196,7 +217,7 @@ fn render_bar(
     };
     // `tab_scale` grows the fret numbers and technique glyphs printed here; the
     // string grid, the clickable cells and the band around it stay put.
-    let cap = FRET_CAP_MM * doc.tab_scale;
+    let cap = FRET_CAP_MM * scale(doc);
     let band = origin.y + STAFF_MM + 1.2;
 
     for (ei, event) in bar.events.iter().enumerate() {
@@ -263,7 +284,7 @@ fn render_bar(
                 w,
                 band,
                 origin,
-                doc.tab_scale,
+                scale(doc),
                 out,
             );
         }
@@ -378,6 +399,56 @@ fn technique(
             }
         }
 
+        // ponytail: the departure digit hangs into the previous event's air, which
+        // `engrave::natural_event_width` (a pure function of Dur) does not reserve —
+        // same as the bend arrows on the right. Two digits at eighth-note spacing can
+        // touch. Widen the slot by passing the event to natural_event_width if it bites.
+        // The departure fret hangs left of the note it slides into, small, with the
+        // stroke between them; both belong to this one beat.
+        Technique::SlideIn { from_fret } => {
+            let gcap = sc(FRET_CAP_MM) * 0.72; // same "small note" ratio as a Grace label
+            let gpt = pt_for_cap(gcap);
+            let gtext = from_fret.to_string();
+            let gw = label_width(&gtext, gpt);
+            let gx = x - w * 0.5 - sc(1.4) - gw * 0.5;
+
+            out.push(quad(
+                gx - gw * 0.5 - 0.4,
+                y - gcap * 0.72,
+                gx + gw * 0.5 + 0.4,
+                y + gcap * 0.72,
+                PAPER,
+            ));
+            out.push(Prim::Text {
+                pos: P {
+                    x: gx,
+                    y: y - gcap * 0.5,
+                },
+                s: gtext,
+                pt: gpt,
+                color,
+                align: Align::Center,
+            });
+
+            let rise = match from_fret {
+                f if f < note.fret => sc(0.7),
+                f if f > note.fret => sc(-0.7),
+                _ => 0.0,
+            };
+            out.push(Prim::Line {
+                a: P {
+                    x: gx + gw * 0.5 + sc(0.35),
+                    y: y - rise,
+                },
+                b: P {
+                    x: x - w * 0.5 - sc(0.35),
+                    y: y + rise,
+                },
+                w: sc(0.28),
+                color,
+            });
+        }
+
         // A grace note leans on the note that follows it.
         Technique::Grace => {
             let mut fret = None;
@@ -481,6 +552,8 @@ fn technique(
 
         Technique::Tap => label_above(x, band, "T", color, scale, out),
         Technique::PinchHarmonic => label_above(x, band, "P.H.", color, scale, out),
+        Technique::Slap => label_above(x, band, "S", color, scale, out),
+        Technique::Pop => label_above(x, band, "P", color, scale, out),
     }
     let _ = doc;
 }
@@ -578,7 +651,7 @@ fn bend_arrow(
 /// Palm-mute and let-ring spans, which run across consecutive events rather than
 /// belonging to one note.
 fn spans(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
-    let sc = |mm: f32| mm * doc.tab_scale;
+    let sc = |mm: f32| mm * scale(doc);
     let band = origin.y + STAFF_MM + 1.2;
     let mut cells: Vec<(f32, bool, bool)> = Vec::new();
     for b in &spacing.bars {

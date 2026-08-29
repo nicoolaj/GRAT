@@ -256,6 +256,57 @@ fn denser_note_spacing_shrinks_the_system_and_fits_more_pages() {
 }
 
 #[test]
+fn identical_bars_get_identical_widths_across_systems() {
+    // Bars of four quarters throughout, except one whole-note bar dropped in to
+    // make the systems break unevenly -- that is exactly the situation where
+    // per-system justification used to stretch one line harder than the next and
+    // pull the barlines of identical music out of column.
+    let mut doc = doc_of_bars(24, BlockModel::OneLine);
+    doc.bars[9].events = vec![Event {
+        dur: Dur {
+            base: NoteValue::Whole,
+            dots: 0,
+        },
+        notes: vec![Note {
+            string: 0,
+            fret: 2,
+            tech: Technique::Plain,
+            tie_next: false,
+        }],
+        ..Default::default()
+    }];
+
+    // Span of a bar, read off the clickable cells: first event to last event on
+    // one string, keyed by bar so the same music can be compared line to line.
+    let mut span: std::collections::BTreeMap<usize, (f32, f32)> = Default::default();
+    for page in layout::paginate(&doc) {
+        for hit in page.hits.iter().filter(|h| h.string == 0) {
+            let x = (hit.min.x + hit.max.x) * 0.5;
+            let e = span.entry(hit.bar).or_insert((x, x));
+            *e = (e.0.min(x), e.1.max(x));
+        }
+    }
+
+    let widths: Vec<f32> = span
+        .iter()
+        .filter(|(bar, _)| doc.bars[**bar].events.len() == 4)
+        .map(|(_, (lo, hi))| hi - lo)
+        .collect();
+    let lo = widths.iter().copied().fold(f32::MAX, f32::min);
+    let hi = widths.iter().copied().fold(0.0_f32, f32::max);
+    assert!(
+        widths.len() > 12,
+        "expected many four-quarter bars to compare, got {}",
+        widths.len()
+    );
+    assert!(hi > 0.0, "bars should have a non-zero span");
+    assert!(
+        hi - lo < 0.01,
+        "four-quarter bars must be the same width on every system: {lo} .. {hi}"
+    );
+}
+
+#[test]
 fn tab_scale_grows_the_fret_numbers_but_not_the_grid() {
     let mut doc = doc_of_bars(6, BlockModel::OneLine);
 
@@ -275,8 +326,30 @@ fn tab_scale_grows_the_fret_numbers_but_not_the_grid() {
         h.max.y - h.min.y
     };
 
+    // The standard size: a fret number is 2.6 mm cap-high and a quarter note is
+    // allotted 8.4 mm at scale 1.0. Both are absolute millimetres on paper, and
+    // both are the values that used to need tab_scale 1.3 / note_spacing 0.7 --
+    // pinned here so a later tidy-up of engrave's table or tablature's SCALE_BASE
+    // cannot quietly move what "1.0" means.
     doc.tab_scale = 1.0;
     let (pt1, grid1) = (fret_pt(&doc), cell_h(&doc));
+    assert!(
+        (pt1 - strungin::staff::pt_for_cap(2.6)).abs() < 0.01,
+        "default fret numbers should be 2.6 mm cap-high, got {pt1} pt"
+    );
+    assert!(
+        (strungin::engrave::natural_event_width(
+            &Dur {
+                base: NoteValue::Quarter,
+                dots: 0
+            },
+            1.0
+        ) - 8.4)
+            .abs()
+            < 0.01,
+        "a quarter note is allotted 8.4 mm at the standard density"
+    );
+
     doc.tab_scale = 1.3;
     let (pt2, grid2) = (fret_pt(&doc), cell_h(&doc));
 

@@ -43,6 +43,8 @@ pub struct EditorState {
     pub bend_quarters: u8,
     /// Armed value for Trill.
     pub trill_to_fret: u8,
+    /// Armed value for SlideIn's departure fret.
+    pub slide_from_fret: u8,
     digit_buffer: String,
     digit_deadline: Option<f64>,
     undo_stack: Vec<Document>,
@@ -64,6 +66,7 @@ impl Default for EditorState {
             shift_following: false,
             bend_quarters: 2,
             trill_to_fret: 0,
+            slide_from_fret: 2,
             digit_buffer: String::new(),
             digit_deadline: None,
             undo_stack: Vec::new(),
@@ -737,6 +740,16 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         "tech.slide_shift",
         &mut action,
     );
+    let sf = state.slide_from_fret;
+    tech_button(
+        ui,
+        state,
+        doc,
+        Technique::SlideIn { from_fret: sf },
+        "tech.slide_in",
+        &mut action,
+    );
+    ui.add(egui::DragValue::new(&mut state.slide_from_fret).range(0..=24));
     tech_button(ui, state, doc, Technique::Grace, "tech.grace", &mut action);
 
     let bq = state.bend_quarters;
@@ -801,6 +814,8 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         &mut action,
     );
     tech_button(ui, state, doc, Technique::Tap, "tech.tap", &mut action);
+    tech_button(ui, state, doc, Technique::Slap, "tech.slap", &mut action);
+    tech_button(ui, state, doc, Technique::Pop, "tech.pop", &mut action);
     tech_button(ui, state, doc, Technique::Dead, "tech.dead", &mut action);
     tech_button(ui, state, doc, Technique::Ghost, "tech.ghost", &mut action);
 

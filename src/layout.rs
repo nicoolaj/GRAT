@@ -45,11 +45,50 @@ const WARN_COLOR: Rgb = Rgb(0xFF, 0x95, 0x00);
 const WARN_OFFSET_MM: f32 = 0.8;
 const WARN_W_MM: f32 = 0.35;
 
+/// One justification scale for the whole document, rather than one per system.
+///
+/// A bar's width has to depend only on what the bar holds: four quarters must
+/// occupy the same room wherever they land, so that two systems carrying the same
+/// music have their barlines in the same columns down the page. Stretching each
+/// system to the right margin on its own breaks precisely that — a system that
+/// happens to end on a short bar is stretched harder than its neighbour, and bars
+/// that hold identical music drift apart by the difference.
+///
+/// So the widest system is the one that fills the line, and every other system
+/// ends short of it. The ragged right margin is the cost of homogeneous bars;
+/// there is no way to have both.
+///
+/// ponytail: a bar too wide for the line (only reachable with an extreme time
+/// signature) drags the whole document's scale down with it, where per-system
+/// justification only squeezed its own line. Clamped at [`engrave::MIN_SQUEEZE`]
+/// like before; give that one bar its own scale if it ever actually happens.
+fn justification_scale(naturals: &[f32], music_width: f32) -> f32 {
+    let widest = naturals.iter().copied().fold(0.0_f32, f32::max);
+    if widest > 0.0 {
+        (music_width / widest).max(engrave::MIN_SQUEEZE)
+    } else {
+        1.0
+    }
+}
+
 /// Lay out the whole document onto A4 pages.
 pub fn paginate(doc: &Document) -> Vec<Page> {
     let usable_width = PAGE_W_MM - 2.0 * MARGIN_MM;
     let music_width = usable_width - tablature::HEAD_MM;
     let systems = break_lines(doc, music_width);
+
+    // Each system's target width: its own natural width taken through the one
+    // document-wide scale, so `system_spacing` re-derives that same scale for
+    // every system instead of a different one per line.
+    let naturals: Vec<f32> = systems
+        .iter()
+        .map(|r| engrave::system_spacing(doc, r.clone(), None).width)
+        .collect();
+    let scale = justification_scale(&naturals, music_width);
+    let systems: Vec<(Range<usize>, f32)> = systems
+        .into_iter()
+        .zip(naturals.iter().map(|n| n * scale))
+        .collect();
 
     let block_h = block_height(doc);
     let capacity = |content_top: f32| -> usize {
@@ -59,7 +98,7 @@ pub fn paginate(doc: &Document) -> Vec<Page> {
     let cap_first = capacity(PAGE_H_MM - MARGIN_MM - TITLE_BLOCK_MM);
     let cap_rest = capacity(PAGE_H_MM - MARGIN_MM);
 
-    let mut chunks: Vec<&[Range<usize>]> = Vec::new();
+    let mut chunks: Vec<&[(Range<usize>, f32)]> = Vec::new();
     if systems.is_empty() {
         // Still one page, furniture only — never zero pages.
         chunks.push(&[]);
@@ -81,7 +120,7 @@ pub fn paginate(doc: &Document) -> Vec<Page> {
     chunks
         .into_iter()
         .enumerate()
-        .map(|(i, sys)| render_page(doc, sys, i + 1, total, music_width, block_h))
+        .map(|(i, sys)| render_page(doc, sys, i + 1, total, block_h))
         .collect()
 }
 
@@ -138,10 +177,9 @@ pub fn ensure_trailing_blank_system(doc: &mut Document) {
 
 fn render_page(
     doc: &Document,
-    systems: &[Range<usize>],
+    systems: &[(Range<usize>, f32)],
     page_no: usize,
     total: usize,
-    music_width: f32,
     block_h: f32,
 ) -> Page {
     let mut prims = Vec::new();
@@ -156,8 +194,8 @@ fn render_page(
         running_header(doc, &mut prims);
     }
 
-    for range in systems {
-        let spacing = engrave::system_spacing(doc, range.clone(), Some(music_width));
+    for (range, target) in systems {
+        let spacing = engrave::system_spacing(doc, range.clone(), Some(*target));
         place_block(doc, &spacing, left_x, top, &mut prims, &mut hits);
         top -= block_h + BLOCK_GAP_MM;
     }

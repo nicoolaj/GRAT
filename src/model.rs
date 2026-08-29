@@ -80,6 +80,11 @@ pub enum Technique {
     Slide,
     /// Picked slide: the line without the slur.
     SlideShift,
+    /// Approach slide: a small departure fret slid into the note, on one beat.
+    /// Unlike `Slide`, it needs no partner event — both frets live on this note.
+    SlideIn {
+        from_fret: u8,
+    },
     /// Appoggiatura.
     Grace,
     /// Quarters of a tone: 1 = quarter, 2 = half, 4 = full.
@@ -98,6 +103,10 @@ pub enum Technique {
     Harmonic,
     PinchHarmonic,
     Tap,
+    /// Slap: a low string struck with the thumb, printed as `S`.
+    Slap,
+    /// Pop: a string plucked and snapped back against the fretboard, printed as `P`.
+    Pop,
     /// Muted note, printed as `x`.
     Dead,
     /// Optional note, printed as `(5)`.
@@ -113,6 +122,7 @@ pub const COLOR_HAMMER_ON: Rgb = Rgb(0x34, 0xC7, 0x59);
 pub const COLOR_PULL_OFF: Rgb = Rgb(0x30, 0xB0, 0xC7);
 pub const COLOR_SLIDE: Rgb = Rgb(0x0A, 0x84, 0xFF);
 pub const COLOR_SLIDE_SHIFT: Rgb = Rgb(0x5A, 0xC8, 0xFA);
+pub const COLOR_SLIDE_IN: Rgb = Rgb(0x00, 0x64, 0xD2);
 pub const COLOR_GRACE: Rgb = Rgb(0x8E, 0x8E, 0x93);
 pub const COLOR_BEND: Rgb = Rgb(0xFF, 0x3B, 0x30);
 pub const COLOR_BEND_RELEASE: Rgb = Rgb(0xFF, 0x69, 0x61);
@@ -122,6 +132,8 @@ pub const COLOR_WIDE_VIBRATO: Rgb = Rgb(0xC7, 0x7D, 0xFF);
 pub const COLOR_HARMONIC: Rgb = Rgb(0x00, 0xC7, 0xBE);
 pub const COLOR_PINCH_HARMONIC: Rgb = Rgb(0xA2, 0x84, 0x5E);
 pub const COLOR_TAP: Rgb = Rgb(0x5E, 0x5C, 0xE6);
+pub const COLOR_SLAP: Rgb = Rgb(0x9B, 0x1B, 0x8F);
+pub const COLOR_POP: Rgb = Rgb(0xC7, 0x4A, 0xBD);
 pub const COLOR_DEAD: Rgb = Rgb(0x8E, 0x8E, 0x93);
 pub const COLOR_GHOST: Rgb = Rgb(0xAE, 0xAE, 0xB2);
 pub const COLOR_TRILL: Rgb = Rgb(0xFF, 0x2D, 0x55);
@@ -133,6 +145,7 @@ pub fn technique_color(t: &Technique) -> Rgb {
         Technique::PullOff => COLOR_PULL_OFF,
         Technique::Slide => COLOR_SLIDE,
         Technique::SlideShift => COLOR_SLIDE_SHIFT,
+        Technique::SlideIn { .. } => COLOR_SLIDE_IN,
         Technique::Grace => COLOR_GRACE,
         Technique::Bend { .. } => COLOR_BEND,
         Technique::BendRelease { .. } => COLOR_BEND_RELEASE,
@@ -142,6 +155,8 @@ pub fn technique_color(t: &Technique) -> Rgb {
         Technique::Harmonic => COLOR_HARMONIC,
         Technique::PinchHarmonic => COLOR_PINCH_HARMONIC,
         Technique::Tap => COLOR_TAP,
+        Technique::Slap => COLOR_SLAP,
+        Technique::Pop => COLOR_POP,
         Technique::Dead => COLOR_DEAD,
         Technique::Ghost => COLOR_GHOST,
         Technique::Trill { .. } => COLOR_TRILL,
@@ -276,11 +291,19 @@ pub struct Document {
     /// technique glyph — multiplied by this. The string grid, the clickable
     /// cells and the staff height are unaffected. 1.0 is the default; bigger
     /// reads more easily. Screen and PDF alike.
+    ///
+    /// 1.0 draws what versions up to 0.3.0 drew at 1.3, so a document saved by one
+    /// of those and carrying an explicit value renders larger than it did — divide
+    /// the old number by 1.3, or just set it back to 1.0.
     #[serde(default = "default_scale")]
     pub tab_scale: f32,
     /// Horizontal density of the music: every millimetre of note spacing in
     /// `engrave` times this. Below 1.0 packs more bars onto a line (it feeds line
     /// breaking); above 1.0 loosens sparse pieces. Shared by tablature and staff.
+    ///
+    /// 1.0 is what versions up to 0.3.0 called 0.7, so a document saved by one of
+    /// those and carrying an explicit value renders denser than it did — divide the
+    /// old number by 0.7, or just set it back to 1.0.
     #[serde(default = "default_scale")]
     pub note_spacing: f32,
     #[serde(default)]

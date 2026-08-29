@@ -9,10 +9,17 @@
 
 use crate::model::{Bar, Document, Dur, Event, NoteValue};
 
-/// Horizontal room reserved after a barline before the first event.
-pub const BAR_LEAD_IN_MM: f32 = 2.5;
-/// Horizontal room reserved after the last event before the next barline.
-pub const BAR_TRAIL_MM: f32 = 2.0;
+/// Air around a barline: half before the bar's first event, half after its last.
+///
+/// One constant split in two, rather than a lead-in and a trail that can drift
+/// apart — that equality is exactly what makes a bar's music sit centred between
+/// its own barlines instead of hugging the left one. The value is what the old
+/// asymmetric pair added up to, so line breaking packs the same bars per line.
+///
+/// ponytail: fixed, so a bar ending on a whole note gets no more air before the
+/// barline than one ending on a sixteenth. Scale the trailing half by the last
+/// event's duration if that ever reads as cramped — at the cost of the symmetry.
+pub const BAR_GAP_MM: f32 = 8.75;
 /// A system is never squeezed below this fraction of its natural width; past that
 /// point the music overflows rather than becoming unreadable.
 pub const MIN_SQUEEZE: f32 = 0.6;
@@ -21,41 +28,46 @@ pub const MIN_SQUEEZE: f32 = 0.6;
 /// scaled by `h` (the document's `note_spacing`: below 1.0 is denser).
 ///
 /// A duration table rather than a formula: it is trivially tunable by eye and the
-/// values below already read well at A4 print size.
+/// values below already read well at A4 print size. They are the millimetres the
+/// default density actually prints — the table was retuned when the standard
+/// moved to what used to be `note_spacing = 0.7`, rather than hiding that move
+/// behind a multiplier.
 ///
 /// ponytail: linear table; switch to `w = k * ticks^0.6` if the visual density of
 /// mixed-duration bars ever needs finer control.
 pub fn natural_event_width(dur: &Dur, h: f32) -> f32 {
     let base = match dur.base {
-        NoteValue::Whole => 26.0,
-        NoteValue::Half => 18.0,
-        NoteValue::Quarter => 12.0,
-        NoteValue::Eighth => 8.0,
-        NoteValue::Sixteenth => 5.5,
-        NoteValue::ThirtySecond => 4.0,
+        NoteValue::Whole => 18.2,
+        NoteValue::Half => 12.6,
+        NoteValue::Quarter => 8.4,
+        NoteValue::Eighth => 5.6,
+        NoteValue::Sixteenth => 3.85,
+        NoteValue::ThirtySecond => 2.8,
     };
     base * (1.0 + 0.25 * dur.dots as f32) * h
 }
 
 /// Width a bar wants when nothing constrains it, at note spacing `h`. Every
-/// millimetre scales with `h` — the lead-in and trail too — so the identity
-/// `natural_bar_width == lead_in + Σ event widths + trail` that `system_spacing`
-/// relies on holds at any density.
+/// millimetre scales with `h` — [`BAR_GAP_MM`] too — so
+/// `natural_bar_width(.., h) == h * natural_bar_width(.., 1.0)` at any density.
+///
+/// Only the events that have a successor *inside the bar* claim a duration slot:
+/// a slot is the room to the next note, and the last note has none. Its width is
+/// [`BAR_GAP_MM`] / 2 of air, the same as the first note's, which is what puts the
+/// music in the middle of the bar.
 pub fn natural_bar_width(bar: &Bar, h: f32) -> f32 {
-    let events: f32 = bar
-        .events
-        .iter()
-        .map(|e| natural_event_width(&e.dur, h))
-        .sum();
-    // An empty bar still needs to be visible and clickable.
-    let events = events.max(natural_event_width(
-        &Dur {
-            base: NoteValue::Whole,
-            dots: 0,
-        },
-        h,
-    ));
-    (BAR_LEAD_IN_MM + BAR_TRAIL_MM) * h + events
+    let events: f32 = match bar.events.split_last() {
+        // An empty bar still needs to be visible and clickable.
+        None => natural_event_width(
+            &Dur {
+                base: NoteValue::Whole,
+                dots: 0,
+            },
+            h,
+        ),
+        Some((_last, head)) => head.iter().map(|e| natural_event_width(&e.dur, h)).sum(),
+    };
+    BAR_GAP_MM * h + events
 }
 
 /// Horizontal placement of one bar inside a system. All values are millimetres
@@ -124,7 +136,9 @@ pub fn system_spacing(
             continue;
         };
         let width = natural_bar_width(bar, h) * scale;
-        let mut cursor = x + BAR_LEAD_IN_MM * h * scale;
+        // Half the barline gap in front; the other half falls out behind the last
+        // event, which claims no slot of its own.
+        let mut cursor = x + BAR_GAP_MM * 0.5 * h * scale;
         let mut events = Vec::with_capacity(bar.events.len());
         for event in &bar.events {
             events.push(cursor);

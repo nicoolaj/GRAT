@@ -128,6 +128,38 @@ fn justification_fills_the_line_without_reordering_events() {
 }
 
 #[test]
+fn a_bar_is_centred_between_its_own_barlines() {
+    // Whatever the bar holds and however the line is justified, the air before the
+    // first event must equal the air after the last one -- otherwise the music
+    // hugs one barline, which is exactly what an eye catches on a printed page.
+    let mixed = vec![
+        ev(NoteValue::Quarter, vec![note(5)]),
+        ev(NoteValue::Quarter, vec![note(8)]),
+        ev(NoteValue::Quarter, vec![note(8)]),
+        ev(NoteValue::Eighth, vec![note(6)]),
+        ev(NoteValue::Eighth, vec![note(5)]),
+    ];
+    for events in [mixed, vec![ev(NoteValue::Whole, vec![note(5)])]] {
+        let n = events.len();
+        let doc = doc_with(Bar {
+            events,
+            time_sig: Some((4, 4)),
+            ..Default::default()
+        });
+        for target in [None, Some(200.0)] {
+            let sp = system_spacing(&doc, 0..1, target);
+            let bar = &sp.bars[0];
+            let lead = bar.events[0] - bar.x;
+            let trail = bar.x + bar.width - bar.events[n - 1];
+            assert!(
+                (lead - trail).abs() < 0.01,
+                "{n} events, target {target:?}: lead {lead} vs trail {trail}"
+            );
+        }
+    }
+}
+
+#[test]
 fn an_incomplete_bar_is_reported_but_still_laid_out() {
     let bar = Bar {
         events: vec![ev(NoteValue::Quarter, vec![note(5)])],

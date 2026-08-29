@@ -37,6 +37,7 @@ const TECH_LEGEND: &[(Technique, &str)] = &[
     (Technique::PullOff, "tech.pull_off"),
     (Technique::Slide, "tech.slide"),
     (Technique::SlideShift, "tech.slide_shift"),
+    (Technique::SlideIn { from_fret: 3 }, "tech.slide_in"),
     (Technique::Grace, "tech.grace"),
     (Technique::Bend { quarters: 4 }, "tech.bend"),
     (Technique::BendRelease { quarters: 2 }, "tech.bend_release"),
@@ -46,6 +47,8 @@ const TECH_LEGEND: &[(Technique, &str)] = &[
     (Technique::Harmonic, "tech.harmonic"),
     (Technique::PinchHarmonic, "tech.pinch_harmonic"),
     (Technique::Tap, "tech.tap"),
+    (Technique::Slap, "tech.slap"),
+    (Technique::Pop, "tech.pop"),
     (Technique::Dead, "tech.dead"),
     (Technique::Ghost, "tech.ghost"),
     (Technique::Trill { to_fret: 9 }, "tech.trill"),
@@ -337,53 +340,16 @@ impl TablaturesApp {
             Err(_) => self.status_msg = Some(t("error.export")),
         }
     }
-}
 
-fn model_label(model: BlockModel) -> String {
-    match model {
-        BlockModel::OneLine => t("model.one_line"),
-        BlockModel::TwoLine => t("model.two_line"),
-        BlockModel::ThreeLine => t("model.three_line"),
-    }
-}
-
-fn staff_order_label(order: StaffOrder) -> String {
-    match order {
-        StaffOrder::TabFirst => t("staff_order.tab_first"),
-        StaffOrder::NotationFirst => t("staff_order.notation_first"),
-    }
-}
-
-impl eframe::App for TablaturesApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // Global keyboard shortcuts: active regardless of which menu (if any) is open.
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_NEW)) {
-            self.request_new();
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_OPEN)) {
-            self.request_open();
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE)) {
-            self.do_save();
-        }
-        if ui
-            .ctx()
-            .input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE_AS))
-        {
-            self.do_save_as();
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_EXPORT)) {
-            self.do_export();
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_QUIT)) {
-            self.request_quit(ui.ctx());
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_UNDO))
-            && canvas::undo(&mut self.editor, &mut self.doc)
-        {
-            self.dirty = true;
-        }
-
+    /// The menu bar. `egui::Panel::top` draws it inside the window on every
+    /// platform -- ponytail: a native `NSMenu` on macOS was tried (via the `muda`
+    /// crate) and reverted. Its custom `NSMenuItem` subclass keeps a raw pointer
+    /// (`Cell<*const MenuChild>`, muda's own "FIXME: use Rc or something else")
+    /// to the Rust side instead of an owned handle, and dereferencing it on click
+    /// aborted the process (SIGABRT, uncaught NSException) on this machine's
+    /// macOS -- confirmed in muda 0.19.3's vendored source, no newer release
+    /// exists. Revisit if muda fixes that FIXME upstream.
+    fn egui_menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button(t("menu.file"), |ui| {
@@ -464,6 +430,55 @@ impl eframe::App for TablaturesApp {
                 }
             });
         });
+    }
+}
+
+fn model_label(model: BlockModel) -> String {
+    match model {
+        BlockModel::OneLine => t("model.one_line"),
+        BlockModel::TwoLine => t("model.two_line"),
+        BlockModel::ThreeLine => t("model.three_line"),
+    }
+}
+
+fn staff_order_label(order: StaffOrder) -> String {
+    match order {
+        StaffOrder::TabFirst => t("staff_order.tab_first"),
+        StaffOrder::NotationFirst => t("staff_order.notation_first"),
+    }
+}
+
+impl eframe::App for TablaturesApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Global keyboard shortcuts: active regardless of which menu (if any) is open.
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_NEW)) {
+            self.request_new();
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_OPEN)) {
+            self.request_open();
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE)) {
+            self.do_save();
+        }
+        if ui
+            .ctx()
+            .input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE_AS))
+        {
+            self.do_save_as();
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_EXPORT)) {
+            self.do_export();
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_QUIT)) {
+            self.request_quit(ui.ctx());
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_UNDO))
+            && canvas::undo(&mut self.editor, &mut self.doc)
+        {
+            self.dirty = true;
+        }
+
+        self.egui_menu_bar(ui);
 
         // Keep a blank line ready under the music: as soon as the last one is
         // written on, the next appears. Not marked dirty -- the appended bars are
@@ -512,9 +527,9 @@ impl eframe::App for TablaturesApp {
                 if ui
                     .add(
                         // Numbers and technique glyphs only; the string grid is
-                        // fixed, so past ~1.4 digits on adjacent strings touch.
+                        // fixed, so past ~1.05 digits on adjacent strings touch.
                         egui::DragValue::new(&mut self.doc.tab_scale)
-                            .range(0.7..=1.4)
+                            .range(0.55..=1.05)
                             .speed(0.01)
                             .max_decimals(2),
                     )
@@ -525,8 +540,10 @@ impl eframe::App for TablaturesApp {
                 ui.label(t("field.note_spacing"));
                 if ui
                     .add(
+                        // Fret labels do not shrink with this, so below ~0.75 two
+                        // digit numbers on consecutive sixteenths start to touch.
                         egui::DragValue::new(&mut self.doc.note_spacing)
-                            .range(0.7..=1.4)
+                            .range(0.75..=2.0)
                             .speed(0.01)
                             .max_decimals(2),
                     )

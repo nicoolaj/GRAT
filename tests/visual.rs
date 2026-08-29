@@ -61,6 +61,7 @@ fn technique_bar() -> Bar {
         Technique::PullOff,
         Technique::Slide,
         Technique::SlideShift,
+        Technique::SlideIn { from_fret: 3 },
         Technique::Grace,
         Technique::Bend { quarters: 4 },
         Technique::BendRelease { quarters: 2 },
@@ -70,6 +71,8 @@ fn technique_bar() -> Bar {
         Technique::Harmonic,
         Technique::PinchHarmonic,
         Technique::Tap,
+        Technique::Slap,
+        Technique::Pop,
         Technique::Dead,
         Technique::Ghost,
         Technique::Trill { to_fret: 9 },
@@ -92,7 +95,7 @@ fn technique_bar() -> Bar {
                 ..Default::default()
             })
             .collect(),
-        time_sig: Some((17, 4)),
+        time_sig: Some((20, 4)),
         ..Default::default()
     }
 }
@@ -215,7 +218,7 @@ fn proof_sheet() {
     );
     assert_eq!(
         hits.len(),
-        (17 + 8 + 6) * 6,
+        (20 + 8 + 6) * 6,
         "one clickable cell per string per event"
     );
     assert!(
