@@ -399,24 +399,24 @@ fn technique(
             }
         }
 
-        // ponytail: the departure digit hangs into the previous event's air, which
-        // `engrave::natural_event_width` (a pure function of Dur) does not reserve —
-        // same as the bend arrows on the right. Two digits at eighth-note spacing can
-        // touch. Widen the slot by passing the event to natural_event_width if it bites.
-        // The departure fret hangs left of the note it slides into, small, with the
-        // stroke between them; both belong to this one beat.
+        // A grace note on the same beat: the departure fret, small, under the bar that
+        // marks it as an ornament. `engrave::event_lead_in` reserves the room it hangs
+        // into — this is the one glyph drawn to the LEFT of its own column.
         Technique::SlideIn { from_fret } => {
             let gcap = sc(FRET_CAP_MM) * 0.72; // same "small note" ratio as a Grace label
             let gpt = pt_for_cap(gcap);
             let gtext = from_fret.to_string();
             let gw = label_width(&gtext, gpt);
-            let gx = x - w * 0.5 - sc(1.4) - gw * 0.5;
+            let gx = x - w * 0.5 - sc(0.9) - gw * 0.5;
+            let bar_y = y + gcap * 0.5 + sc(0.55);
 
+            // One knockout for the digit and its bar together: the string line is broken
+            // once, behind the whole ornament.
             out.push(quad(
                 gx - gw * 0.5 - 0.4,
                 y - gcap * 0.72,
                 gx + gw * 0.5 + 0.4,
-                y + gcap * 0.72,
+                bar_y + sc(0.3),
                 PAPER,
             ));
             out.push(Prim::Text {
@@ -429,22 +429,16 @@ fn technique(
                 color,
                 align: Align::Center,
             });
-
-            let rise = match from_fret {
-                f if f < note.fret => sc(0.7),
-                f if f > note.fret => sc(-0.7),
-                _ => 0.0,
-            };
             out.push(Prim::Line {
                 a: P {
-                    x: gx + gw * 0.5 + sc(0.35),
-                    y: y - rise,
+                    x: gx - gw * 0.5 - sc(0.15),
+                    y: bar_y,
                 },
                 b: P {
-                    x: x - w * 0.5 - sc(0.35),
-                    y: y + rise,
+                    x: gx + gw * 0.5 + sc(0.15),
+                    y: bar_y,
                 },
-                w: sc(0.28),
+                w: sc(0.3),
                 color,
             });
         }

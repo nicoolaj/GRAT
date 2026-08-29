@@ -2,8 +2,8 @@
 //! impossible to eyeball once a page is full of notes.
 
 use strungin::engrave::{
-    bar_ticks, beam_groups, beam_runs, is_complete, set_event_dur, set_time_sig, shift_event_dur,
-    split_ticks, system_spacing,
+    bar_ticks, beam_groups, beam_runs, is_complete, natural_bar_width, set_event_dur, set_time_sig,
+    shift_event_dur, split_ticks, system_spacing, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
 };
 use strungin::model::*;
 
@@ -157,6 +157,44 @@ fn a_bar_is_centred_between_its_own_barlines() {
             );
         }
     }
+}
+
+#[test]
+fn an_approach_slide_claims_room_in_front_of_itself() {
+    // Its departure digit is drawn left of its own column: without a lead-in it
+    // lands on the barline or on the previous note.
+    // Both the bar's natural width and the event's x must grow, or the music
+    // silently overflows its own bar.
+    let plain = Bar {
+        events: vec![
+            ev(NoteValue::Quarter, vec![note(5)]),
+            ev(NoteValue::Quarter, vec![note(7)]),
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    };
+    let mut slid = plain.clone();
+    slid.events[1].notes[0].tech = Technique::SlideIn { from_fret: 3 };
+
+    assert!(
+        (natural_bar_width(&slid, 1.0) - natural_bar_width(&plain, 1.0) - SLIDE_IN_LEAD_MM).abs()
+            < 0.001,
+        "the bar's natural width must grow by exactly SLIDE_IN_LEAD_MM"
+    );
+
+    let plain_sp = system_spacing(&doc_with(plain), 0..1, None);
+    let slid_sp = system_spacing(&doc_with(slid), 0..1, None);
+    assert!(
+        (slid_sp.bars[0].events[1] - plain_sp.bars[0].events[1] - SLIDE_IN_LEAD_MM).abs() < 0.001,
+        "the slide-in event's own x must move right by the same lead-in"
+    );
+
+    let bar = &slid_sp.bars[0];
+    let trail = bar.x + bar.width - bar.events[1];
+    assert!(
+        (trail - BAR_GAP_MM / 2.0).abs() < 0.001,
+        "trailing air must stay BAR_GAP_MM / 2 even though an earlier event grew: got {trail}"
+    );
 }
 
 #[test]

@@ -7,7 +7,7 @@
 //! The spacing computed here is shared by all three rows of a block (tablature,
 //! strum row, notation staff), which is what keeps them vertically aligned.
 
-use crate::model::{Bar, Document, Dur, Event, NoteValue};
+use crate::model::{Bar, Document, Dur, Event, NoteValue, Technique};
 
 /// Air around a barline: half before the bar's first event, half after its last.
 ///
@@ -47,6 +47,30 @@ pub fn natural_event_width(dur: &Dur, h: f32) -> f32 {
     base * (1.0 + 0.25 * dur.dots as f32) * h
 }
 
+/// Extra room in front of an event, for a glyph drawn to the LEFT of its own
+/// column. Only the approach slide has one: its departure digit sits before the
+/// note, and `natural_event_width` — a function of duration alone — reserves
+/// nothing for it, so without this the digit lands on the barline or on the
+/// previous note.
+///
+/// ponytail: one flat value, not the digit's measured width, and it does not
+/// follow `tab_scale` — same simplification as `tablature::BAND_MM`. Measure with
+/// `staff::label_width` here if a two-digit departure fret at a large `tab_scale`
+/// ever crowds again.
+pub const SLIDE_IN_LEAD_MM: f32 = 4.0;
+
+pub fn event_lead_in(event: &Event, h: f32) -> f32 {
+    if event
+        .notes
+        .iter()
+        .any(|n| matches!(n.tech, Technique::SlideIn { .. }))
+    {
+        SLIDE_IN_LEAD_MM * h
+    } else {
+        0.0
+    }
+}
+
 /// Width a bar wants when nothing constrains it, at note spacing `h`. Every
 /// millimetre scales with `h` — [`BAR_GAP_MM`] too — so
 /// `natural_bar_width(.., h) == h * natural_bar_width(.., 1.0)` at any density.
@@ -54,7 +78,9 @@ pub fn natural_event_width(dur: &Dur, h: f32) -> f32 {
 /// Only the events that have a successor *inside the bar* claim a duration slot:
 /// a slot is the room to the next note, and the last note has none. Its width is
 /// [`BAR_GAP_MM`] / 2 of air, the same as the first note's, which is what puts the
-/// music in the middle of the bar.
+/// music in the middle of the bar. A lead-in is different: it reserves room in
+/// front of its own note regardless of what follows, so every event counts here,
+/// the last one included.
 pub fn natural_bar_width(bar: &Bar, h: f32) -> f32 {
     let events: f32 = match bar.events.split_last() {
         // An empty bar still needs to be visible and clickable.
@@ -67,7 +93,8 @@ pub fn natural_bar_width(bar: &Bar, h: f32) -> f32 {
         ),
         Some((_last, head)) => head.iter().map(|e| natural_event_width(&e.dur, h)).sum(),
     };
-    BAR_GAP_MM * h + events
+    let lead_in: f32 = bar.events.iter().map(|e| event_lead_in(e, h)).sum();
+    BAR_GAP_MM * h + events + lead_in
 }
 
 /// Horizontal placement of one bar inside a system. All values are millimetres
@@ -141,6 +168,12 @@ pub fn system_spacing(
         let mut cursor = x + BAR_GAP_MM * 0.5 * h * scale;
         let mut events = Vec::with_capacity(bar.events.len());
         for event in &bar.events {
+            // A lead-in pushes this event's own column right, carving out the room
+            // its glyph hangs into on the left. `natural_bar_width` counts the same
+            // term, so the air behind the bar's last note is unchanged -- except
+            // when the *first* event itself claims a lead-in, which deliberately
+            // unbalances the bar: it eats into the front gap instead of the back.
+            cursor += event_lead_in(event, h) * scale;
             events.push(cursor);
             cursor += natural_event_width(&event.dur, h) * scale;
         }
