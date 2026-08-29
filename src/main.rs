@@ -417,21 +417,28 @@ impl TablaturesApp {
                     // Input mode: whether an explicit duration change pushes the
                     // rest of the piece forward or absorbs locally. The status
                     // bar's "INS" light reflects this.
-                    ui.label(t("menu.input_mode"));
-                    if ui
-                        .selectable_label(self.editor.shift_following, t("tool.shift_following"))
-                        .clicked()
-                    {
-                        self.editor.shift_following = true;
-                        ui.close();
-                    }
-                    if ui
-                        .selectable_label(!self.editor.shift_following, t("tool.keep_following"))
-                        .clicked()
-                    {
-                        self.editor.shift_following = false;
-                        ui.close();
-                    }
+                    ui.menu_button(t("menu.input_mode"), |ui| {
+                        if ui
+                            .selectable_label(
+                                self.editor.shift_following,
+                                t("tool.shift_following"),
+                            )
+                            .clicked()
+                        {
+                            self.editor.shift_following = true;
+                            ui.close();
+                        }
+                        if ui
+                            .selectable_label(
+                                !self.editor.shift_following,
+                                t("tool.keep_following"),
+                            )
+                            .clicked()
+                        {
+                            self.editor.shift_following = false;
+                            ui.close();
+                        }
+                    });
                 });
 
                 ui.menu_button(t("menu.view"), |ui| {
