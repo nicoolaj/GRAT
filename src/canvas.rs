@@ -568,6 +568,14 @@ pub fn status(ui: &mut egui::Ui, state: &mut EditorState, pages: &[Page]) {
             .range(1.0..=12.0)
             .speed(0.05),
     );
+    ui.separator();
+    // Insert-mode light: bright when a duration change shifts the following
+    // music, dim when it absorbs locally. Toggled from the Edit menu.
+    if state.shift_following {
+        ui.strong(t("status.insert_mode"));
+    } else {
+        ui.weak(t("status.insert_mode"));
+    }
 }
 
 fn tech_button(
@@ -614,22 +622,8 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     let sel = state.selected;
 
     // How the two duration widgets below behave when they change an existing
-    // event: absorb locally (default) or push the rest of the piece forward.
-    ui.horizontal(|ui| {
-        if ui
-            .selectable_label(state.shift_following, t("tool.shift_following"))
-            .clicked()
-        {
-            state.shift_following = true;
-        }
-        if ui
-            .selectable_label(!state.shift_following, t("tool.keep_following"))
-            .clicked()
-        {
-            state.shift_following = false;
-        }
-    });
-
+    // event -- absorb locally (default) or push the rest of the piece forward --
+    // lives in the Edit menu now, mirrored by the status bar's "INS" light.
     ui.label(t("tool.value"));
     ui.horizontal_wrapped(|ui| {
         for v in [

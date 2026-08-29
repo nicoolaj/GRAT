@@ -412,6 +412,27 @@ impl TablaturesApp {
                     }
                 });
 
+                ui.menu_button(t("menu.edit"), |ui| {
+                    // Input mode: whether an explicit duration change pushes the
+                    // rest of the piece forward or absorbs locally. The status
+                    // bar's "INS" light reflects this.
+                    ui.label(t("menu.input_mode"));
+                    if ui
+                        .selectable_label(self.editor.shift_following, t("tool.shift_following"))
+                        .clicked()
+                    {
+                        self.editor.shift_following = true;
+                        ui.close();
+                    }
+                    if ui
+                        .selectable_label(!self.editor.shift_following, t("tool.keep_following"))
+                        .clicked()
+                    {
+                        self.editor.shift_following = false;
+                        ui.close();
+                    }
+                });
+
                 ui.menu_button(t("menu.view"), |ui| {
                     ui.menu_button(t("menu.language"), |ui| {
                         for lang in i18n::available_langs() {
