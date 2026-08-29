@@ -403,27 +403,30 @@ fn technique(
         // marks it as an ornament. `engrave::event_lead_in` reserves the room it hangs
         // into — this is the one glyph drawn to the LEFT of its own column.
         Technique::SlideIn { from_fret } => {
-            let gcap = sc(FRET_CAP_MM) * 0.72; // same "small note" ratio as a Grace label
+            let cap = sc(FRET_CAP_MM);
+            let gcap = cap * 0.72; // same "small note" ratio as a Grace label
             let gpt = pt_for_cap(gcap);
             let gtext = from_fret.to_string();
             let gw = label_width(&gtext, gpt);
             let gx = x - w * 0.5 - sc(0.9) - gw * 0.5;
-            let bar_y = y + gcap * 0.5 + sc(0.55);
+            // The two digits sit on one baseline, the fret labels' own: a smaller
+            // glyph centred on the string line instead would ride visibly high
+            // next to the note it belongs to. The ornament grows upwards from
+            // there, which is where its bar wants to be anyway.
+            let base_y = y - cap * 0.5;
+            let bar_y = base_y + gcap + sc(0.55);
 
             // One knockout for the digit and its bar together: the string line is broken
             // once, behind the whole ornament.
             out.push(quad(
                 gx - gw * 0.5 - 0.4,
-                y - gcap * 0.72,
+                y - cap * 0.72,
                 gx + gw * 0.5 + 0.4,
                 bar_y + sc(0.3),
                 PAPER,
             ));
             out.push(Prim::Text {
-                pos: P {
-                    x: gx,
-                    y: y - gcap * 0.5,
-                },
+                pos: P { x: gx, y: base_y },
                 s: gtext,
                 pt: gpt,
                 color,
