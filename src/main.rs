@@ -29,30 +29,64 @@ const SHORTCUT_QUIT: egui::KeyboardShortcut =
 const SHORTCUT_UNDO: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
 
-/// Every playing technique with its i18n key, for the Help legend. One representative
-/// field value per variant, same choices as `tests/visual.rs::technique_bar`.
-const TECH_LEGEND: &[(Technique, &str)] = &[
-    (Technique::Plain, "tech.plain"),
-    (Technique::HammerOn, "tech.hammer_on"),
-    (Technique::PullOff, "tech.pull_off"),
-    (Technique::Slide, "tech.slide"),
-    (Technique::SlideShift, "tech.slide_shift"),
-    (Technique::SlideIn { from_fret: 3 }, "tech.slide_in"),
-    (Technique::Grace, "tech.grace"),
-    (Technique::Bend { quarters: 4 }, "tech.bend"),
-    (Technique::BendRelease { quarters: 2 }, "tech.bend_release"),
-    (Technique::PreBend { quarters: 4 }, "tech.pre_bend"),
-    (Technique::Vibrato, "tech.vibrato"),
-    (Technique::WideVibrato, "tech.wide_vibrato"),
-    (Technique::Harmonic, "tech.harmonic"),
-    (Technique::PinchHarmonic, "tech.pinch_harmonic"),
-    (Technique::Tap, "tech.tap"),
-    (Technique::Slap, "tech.slap"),
-    (Technique::Pop, "tech.pop"),
-    (Technique::Dead, "tech.dead"),
-    (Technique::Ghost, "tech.ghost"),
-    (Technique::Trill { to_fret: 9 }, "tech.trill"),
+/// Every playing technique with its i18n key and the kind it belongs to, for the Help
+/// legend and the Edit > note styles submenu. One representative field value per
+/// variant, same choices as `tests/visual.rs::technique_bar`. Entries of one kind are
+/// consecutive — that is what draws the group headings in the submenu — and a
+/// technique's position here is its bit in `EditorState::tech_shown`.
+const TECH_LEGEND: &[(Technique, &str, &str)] = &[
+    (Technique::Plain, "tech.plain", "techkind.plain"),
+    (Technique::HammerOn, "tech.hammer_on", "techkind.legato"),
+    (Technique::PullOff, "tech.pull_off", "techkind.legato"),
+    (Technique::Slide, "tech.slide", "techkind.legato"),
+    (Technique::SlideShift, "tech.slide_shift", "techkind.legato"),
+    (
+        Technique::SlideIn { from_fret: 3 },
+        "tech.slide_in",
+        "techkind.legato",
+    ),
+    (Technique::Grace, "tech.grace", "techkind.legato"),
+    (
+        Technique::Bend { quarters: 4 },
+        "tech.bend",
+        "techkind.bend",
+    ),
+    (
+        Technique::BendRelease { quarters: 2 },
+        "tech.bend_release",
+        "techkind.bend",
+    ),
+    (
+        Technique::PreBend { quarters: 4 },
+        "tech.pre_bend",
+        "techkind.bend",
+    ),
+    (Technique::Vibrato, "tech.vibrato", "techkind.ornament"),
+    (
+        Technique::WideVibrato,
+        "tech.wide_vibrato",
+        "techkind.ornament",
+    ),
+    (
+        Technique::Trill { to_fret: 9 },
+        "tech.trill",
+        "techkind.ornament",
+    ),
+    (Technique::Harmonic, "tech.harmonic", "techkind.harmonic"),
+    (
+        Technique::PinchHarmonic,
+        "tech.pinch_harmonic",
+        "techkind.harmonic",
+    ),
+    (Technique::Tap, "tech.tap", "techkind.attack"),
+    (Technique::Slap, "tech.slap", "techkind.attack"),
+    (Technique::Pop, "tech.pop", "techkind.attack"),
+    (Technique::Dead, "tech.dead", "techkind.muted"),
+    (Technique::Ghost, "tech.ghost", "techkind.muted"),
 ];
+
+/// Which palette technique buttons are switched on, remembered across sessions.
+const TECH_SHOWN_STORAGE_KEY: &str = "tech_shown";
 
 /// Decode and downscale the cover artwork exactly once. Shared by the window icon
 /// (built here, before the app exists) and the About/Help texture (built once in
@@ -206,9 +240,16 @@ impl TablaturesApp {
         cover_w: u32,
         cover_h: u32,
     ) -> Self {
+        let mut editor = canvas::EditorState::default();
         if let Some(storage) = cc.storage {
             if let Some(lang) = storage.get_string(i18n::LANG_STORAGE_KEY) {
                 i18n::set_lang(&lang);
+            }
+            if let Some(mask) = storage
+                .get_string(TECH_SHOWN_STORAGE_KEY)
+                .and_then(|s| s.parse().ok())
+            {
+                editor.tech_shown = mask;
             }
         }
         style_context(&cc.egui_ctx);
@@ -228,7 +269,7 @@ impl TablaturesApp {
             show_help: false,
             pending_open_pdf: None,
             status_msg: None,
-            editor: canvas::EditorState::default(),
+            editor,
             cover,
         }
     }
@@ -437,6 +478,36 @@ impl TablaturesApp {
                         {
                             self.editor.shift_following = false;
                             ui.close();
+                        }
+                    });
+                    // Note styles: which technique buttons the palette carries.
+                    // Twenty of them is more than most players ever want, and the
+                    // ones left out give the palette its room back.
+                    ui.menu_button(t("menu.note_styles"), |ui| {
+                        let mut kind = "";
+                        for (i, (tech, key, group)) in TECH_LEGEND.iter().enumerate() {
+                            if *group != kind {
+                                if !kind.is_empty() {
+                                    ui.separator();
+                                }
+                                ui.label(t(group));
+                                kind = group;
+                            }
+                            let bit = 1u32 << i;
+                            let mut on = self.editor.tech_shown & bit != 0;
+                            let label = egui::RichText::new(t(key))
+                                .color(canvas::rgb(technique_color(tech)));
+                            if ui.checkbox(&mut on, label).changed() {
+                                self.editor.tech_shown ^= bit;
+                                // Hiding the armed technique would leave a tool
+                                // selected with no button to show for it.
+                                if !on
+                                    && std::mem::discriminant(&self.editor.tool_tech)
+                                        == std::mem::discriminant(tech)
+                                {
+                                    self.editor.tool_tech = Technique::Plain;
+                                }
+                            }
                         }
                     });
                 });
@@ -736,7 +807,7 @@ impl eframe::App for TablaturesApp {
                 ui.add_space(8.0);
 
                 ui.heading(t("help.legend_title"));
-                for &(tech, key) in TECH_LEGEND {
+                for &(tech, key, _) in TECH_LEGEND {
                     ui.horizontal(|ui| {
                         let (swatch, _) =
                             ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
@@ -810,5 +881,6 @@ impl eframe::App for TablaturesApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(i18n::LANG_STORAGE_KEY, i18n::current_lang());
+        storage.set_string(TECH_SHOWN_STORAGE_KEY, self.editor.tech_shown.to_string());
     }
 }

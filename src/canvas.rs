@@ -45,6 +45,9 @@ pub struct EditorState {
     pub trill_to_fret: u8,
     /// Armed value for SlideIn's departure fret.
     pub slide_from_fret: u8,
+    /// One bit per `TECH_LEGEND` entry: the technique buttons the palette shows.
+    /// Edited from Edit > note styles, remembered across sessions.
+    pub tech_shown: u32,
     digit_buffer: String,
     digit_deadline: Option<f64>,
     undo_stack: Vec<Document>,
@@ -67,6 +70,7 @@ impl Default for EditorState {
             bend_quarters: 2,
             trill_to_fret: 0,
             slide_from_fret: 2,
+            tech_shown: u32::MAX,
             digit_buffer: String::new(),
             digit_deadline: None,
             undo_stack: Vec::new(),
@@ -105,6 +109,16 @@ pub fn undo(state: &mut EditorState, doc: &mut Document) -> bool {
 
 pub(crate) fn rgb(c: strungin::Rgb) -> egui::Color32 {
     egui::Color32::from_rgb(c.0, c.1, c.2)
+}
+
+/// Whether `tech` keeps a button in the palette. The bit is the technique's position
+/// in `TECH_LEGEND`; scanning twenty entries per button is cheaper than a second
+/// table to keep in sync. A technique missing from the table stays visible.
+pub(crate) fn tech_visible(state: &EditorState, tech: &Technique) -> bool {
+    crate::TECH_LEGEND
+        .iter()
+        .position(|(t, _, _)| std::mem::discriminant(t) == std::mem::discriminant(tech))
+        .is_none_or(|i| state.tech_shown & (1 << i) != 0)
 }
 
 fn to_screen(page_rect: egui::Rect, zoom: f32, p: strungin::P) -> egui::Pos2 {
@@ -586,6 +600,9 @@ fn tech_button(
     key: &str,
     action: &mut Option<Action>,
 ) {
+    if !tech_visible(state, &tech) {
+        return;
+    }
     let color = rgb(model::technique_color(&tech));
     let armed = std::mem::discriminant(&state.tool_tech) == std::mem::discriminant(&tech);
     let resp = ui.add(egui::Button::new(egui::RichText::new(t(key)).color(color)).selected(armed));
@@ -743,7 +760,9 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         "tech.slide_in",
         &mut action,
     );
-    ui.add(egui::DragValue::new(&mut state.slide_from_fret).range(0..=24));
+    if tech_visible(state, &Technique::SlideIn { from_fret: 0 }) {
+        ui.add(egui::DragValue::new(&mut state.slide_from_fret).range(0..=24));
+    }
     tech_button(ui, state, doc, Technique::Grace, "tech.grace", &mut action);
 
     let bq = state.bend_quarters;
@@ -773,7 +792,16 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     );
     // Bend amount in quarters of a tone (1 = quarter, 2 = half, 4 = full) shared
     // by all three bend techniques above -- adjustable, never hardcoded.
-    ui.add(egui::DragValue::new(&mut state.bend_quarters).range(1..=8));
+    if [
+        Technique::Bend { quarters: 0 },
+        Technique::BendRelease { quarters: 0 },
+        Technique::PreBend { quarters: 0 },
+    ]
+    .iter()
+    .any(|t| tech_visible(state, t))
+    {
+        ui.add(egui::DragValue::new(&mut state.bend_quarters).range(1..=8));
+    }
 
     tech_button(
         ui,
@@ -823,7 +851,9 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         &mut action,
     );
     // Target fret the trill alternates up to -- likewise adjustable.
-    ui.add(egui::DragValue::new(&mut state.trill_to_fret).range(0..=24));
+    if tech_visible(state, &Technique::Trill { to_fret: 0 }) {
+        ui.add(egui::DragValue::new(&mut state.trill_to_fret).range(0..=24));
+    }
 
     ui.separator();
     for (strum, key) in [
@@ -1007,6 +1037,24 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_technique_has_its_own_visibility_bit() {
+        let mut state = EditorState::default();
+        for (i, (tech, _, _)) in crate::TECH_LEGEND.iter().enumerate() {
+            assert!(tech_visible(&state, tech), "all styles show by default");
+            state.tech_shown = !(1 << i);
+            assert!(!tech_visible(&state, tech), "bit {i} hides its own style");
+            assert!(
+                crate::TECH_LEGEND
+                    .iter()
+                    .filter(|(t, _, _)| std::mem::discriminant(t) != std::mem::discriminant(tech))
+                    .all(|(t, _, _)| tech_visible(&state, t)),
+                "and hides nothing else"
+            );
+            state.tech_shown = u32::MAX;
+        }
+    }
 
     #[test]
     fn handle_digit_arms_the_tool_value_on_an_empty_cell() {
