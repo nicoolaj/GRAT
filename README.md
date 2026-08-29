@@ -35,7 +35,10 @@ construction.
 Les documents sont enregistrés en JSON lisible et diffable, extension `.gtab`
 (`serde_json::to_string_pretty`). Le format est tolérant aux évolutions futures : les
 champs absents dans un fichier plus ancien reprennent une valeur par défaut sensée au
-chargement (`#[serde(default)]`).
+chargement (`#[serde(default)]`). Depuis la version 2 du format, un champ qui vaut son
+défaut n'est simplement plus écrit (une durée s'enregistre comme un nombre de ticks
+plutôt que `{base, dots}`), ce qui réduit nettement la taille des fichiers sans changer
+le modèle de données ; les fichiers v1 existants continuent de se charger tels quels.
 
 ## Cibles Makefile
 

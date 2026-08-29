@@ -305,7 +305,7 @@ impl TablaturesApp {
     }
 
     fn save_to(&mut self, path: PathBuf) {
-        let Ok(json) = serde_json::to_string_pretty(&self.doc) else {
+        let Ok(json) = self.doc.to_json() else {
             self.status_msg = Some(t("error.save"));
             return;
         };

@@ -1,7 +1,8 @@
 //! Integration tests against the public `tablatures` crate API.
 
 use strungin::model::{
-    Bar, BlockModel, Document, Dur, Event, LoadError, Note, NoteValue, Technique, FORMAT_VERSION,
+    Bar, BlockModel, Document, Dur, Event, LoadError, Note, NoteValue, StaffOrder, Strum,
+    Technique, FORMAT_VERSION, MAX_DOTS,
 };
 use strungin::{engrave, i18n, layout, pdf};
 
@@ -72,8 +73,20 @@ fn document_round_trips_through_json() {
                 tech: Technique::Slide,
                 tie_next: true,
             },
+            Note {
+                string: 2,
+                fret: 9,
+                tech: Technique::Bend { quarters: 2 },
+                tie_next: false,
+            },
+            Note {
+                string: 3,
+                fret: 5,
+                tech: Technique::SlideIn { from_fret: 2 },
+                tie_next: false,
+            },
         ],
-        strum: None,
+        strum: Some(Strum::Down),
         ..Default::default()
     });
     doc.bars[0].events.push(Event {
@@ -91,8 +104,8 @@ fn document_round_trips_through_json() {
         ..Default::default()
     });
 
-    let json = serde_json::to_string_pretty(&doc).expect("serialize");
-    let round_tripped: Document = serde_json::from_str(&json).expect("deserialize");
+    let json = doc.to_json().expect("serialize");
+    let round_tripped = Document::from_json(&json).expect("deserialize");
 
     assert_eq!(doc, round_tripped);
 }
@@ -133,6 +146,163 @@ fn from_json_versions_the_format() {
 
     // Garbage is a parse error.
     assert_eq!(Document::from_json("not json"), Err(LoadError::Parse));
+}
+
+const V1_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v1.gtab");
+
+#[test]
+fn v1_fixture_loads_as_the_expected_document() {
+    let json = std::fs::read_to_string(V1_FIXTURE).expect("v1.gtab fixture must exist");
+    let doc = Document::from_json(&json).expect("v1 fixture loads");
+
+    assert_eq!(doc.format_version, 1, "no format_version key means v1");
+
+    let expected = Document {
+        format_version: 1,
+        title: "V1 Fixture".to_string(),
+        author: String::new(),
+        tuning: [64, 59, 55, 50, 45, 40],
+        capo: 0,
+        tempo: 120,
+        tab_scale: 1.0,
+        note_spacing: 1.0,
+        model: BlockModel::OneLine,
+        staff_order: StaffOrder::TabFirst,
+        bars: vec![Bar {
+            events: vec![
+                Event {
+                    dur: Dur {
+                        base: NoteValue::Quarter,
+                        dots: 1,
+                    },
+                    notes: vec![Note {
+                        string: 0,
+                        fret: 3,
+                        tech: Technique::Plain,
+                        tie_next: false,
+                    }],
+                    strum: Some(Strum::Down),
+                    palm_mute: false,
+                    let_ring: false,
+                },
+                Event {
+                    dur: Dur {
+                        base: NoteValue::Eighth,
+                        dots: 0,
+                    },
+                    notes: vec![Note {
+                        string: 1,
+                        fret: 7,
+                        tech: Technique::SlideIn { from_fret: 7 },
+                        tie_next: false,
+                    }],
+                    strum: None,
+                    palm_mute: false,
+                    let_ring: false,
+                },
+                Event {
+                    dur: Dur {
+                        base: NoteValue::Quarter,
+                        dots: 0,
+                    },
+                    notes: Vec::new(), // "notes": [] rest event
+                    strum: None,
+                    palm_mute: false,
+                    let_ring: false,
+                },
+            ],
+            time_sig: Some((4, 4)),
+            repeat_start: false,
+            repeat_end: Some(2),
+        }],
+    };
+
+    assert_eq!(doc, expected);
+}
+
+#[test]
+fn resaving_a_v1_file_declares_the_current_version() {
+    let json = std::fs::read_to_string(V1_FIXTURE).expect("v1.gtab fixture must exist");
+    let doc = Document::from_json(&json).expect("v1 fixture loads");
+    let resaved = doc.to_json().expect("serialize");
+    assert!(
+        resaved.contains(&format!("\"format_version\": {FORMAT_VERSION}")),
+        "re-saving a v1 document must declare the current version, got:\n{resaved}"
+    );
+}
+
+#[test]
+fn new_empty_document_omits_every_default_field() {
+    let json = Document::new_empty().to_json().expect("serialize");
+    for absent in [
+        "\"tie_next\"",
+        "\"palm_mute\"",
+        "\"strum\"",
+        "\"Quarter\"",
+        ": null",
+        ": false",
+    ] {
+        assert!(
+            !json.contains(absent),
+            "did not expect `{absent}` in an all-default document:\n{json}"
+        );
+    }
+    assert!(
+        json.contains("\"dur\": 960"),
+        "a duration should be a bare tick count:\n{json}"
+    );
+}
+
+#[test]
+fn dur_from_ticks_inverts_ticks_for_every_combination() {
+    let values = [
+        NoteValue::Whole,
+        NoteValue::Half,
+        NoteValue::Quarter,
+        NoteValue::Eighth,
+        NoteValue::Sixteenth,
+        NoteValue::ThirtySecond,
+    ];
+    for base in values {
+        for dots in 0..=MAX_DOTS {
+            let d = Dur { base, dots };
+            assert_eq!(
+                Dur::from_ticks(d.ticks()),
+                Some(d),
+                "from_ticks(ticks({base:?} + {dots} dots)) should invert"
+            );
+        }
+    }
+    assert_eq!(
+        Dur::from_ticks(7),
+        None,
+        "7 ticks matches none of the 24 valid combinations"
+    );
+}
+
+#[test]
+fn v2_output_is_less_than_half_the_size_of_v1() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/exemples/legato-study.gtab");
+    let original = std::fs::read_to_string(path).expect("legato-study.gtab must exist");
+    let doc = Document::from_json(&original).expect("example must load");
+    let resaved = doc.to_json().expect("serialize");
+    assert!(
+        resaved.len() < original.len() / 2,
+        "expected v2 output under half of {} bytes, got {} bytes",
+        original.len(),
+        resaved.len()
+    );
+    // Shrinking the file is only worth anything if it still says the same thing: a real
+    // v1 document (techniques, ties, dotted values and all) must survive the trip out
+    // and back unchanged. `format_version` is the one field allowed to move, 1 -> 2.
+    let reloaded = Document::from_json(&resaved).expect("v2 output must load back");
+    assert_eq!(
+        Document {
+            format_version: doc.format_version,
+            ..reloaded
+        },
+        doc
+    );
 }
 
 #[test]

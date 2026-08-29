@@ -7,7 +7,7 @@
 
 use eframe::egui;
 use strungin::layout::Page;
-use strungin::model::{Document, NoteValue, Strum, Technique};
+use strungin::model::{Document, NoteValue, Strum, Technique, MAX_DOTS};
 use strungin::{engrave, i18n::t, model, staff, tablature, Align, Prim, PAGE_H_MM, PAGE_W_MM};
 
 /// Visual gap between stacked pages on screen. Screen-only: has no equivalent in
@@ -664,7 +664,7 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     ui.horizontal(|ui| {
         ui.label(t("tool.dot"));
         if ui
-            .add(egui::DragValue::new(&mut state.tool_value.dots).range(0..=3))
+            .add(egui::DragValue::new(&mut state.tool_value.dots).range(0..=MAX_DOTS))
             .changed()
         {
             let dots = state.tool_value.dots;

@@ -144,6 +144,17 @@ and in `Document::from_json` (between the version probe and the final parse) mig
 up to today's shape. Every load goes through `from_json`; a file claiming a newer version than this
 build is refused (`LoadError::TooNew`), not parsed with fields silently dropped.
 
+The v1 → v2 bump (a type change: `Dur` went from `{base, dots}` to a bare tick count, plus every
+field that equals its default stops being written at all) needed no migration code in `from_json`
+— a real exception to the paragraph above, not a precedent to follow blindly. It reads both
+directions because `Dur`'s hand-written `Deserialize` is a `#[serde(untagged)]` enum trying a tick
+count first and the old two-field shape second, and every other field v2 omits is one a v1 file
+always wrote explicitly, so plain `#[serde(default)]` fills it in either way. Reach for that trick
+again only when the old and new shapes are this cleanly distinguishable on sight (a number vs. an
+object); anything murkier belongs in the probe-then-migrate seam instead. `exemples/*.gtab` are
+kept as unversioned v1 files on purpose — `make examples` re-reads them on every run, which makes
+them a free, permanent v1-compatibility check. Do not "upgrade" them to v2.
+
 **Change how something is engraved.** Everything rhythmic (what gets beamed, how wide a note is) is
 in `engrave.rs` and is unit-tested in `tests/engraving.rs`. Everything visual is in `notation.rs` /
 `tablature.rs` and is checked by eye — see below.

@@ -20,7 +20,14 @@ pub const TICKS_WHOLE: u32 = 3840;
 /// need a bump. A file with no `format_version` key predates versioning and is
 /// treated as version 1. See [`Document::from_json`] for the read path and the
 /// migration seam.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// v2 changed `Dur`'s wire shape from `{"base": ..., "dots": ...}` to a plain
+/// tick count (see its hand-written `Serialize`/`Deserialize` below) and stopped
+/// writing fields that equal their default. A pre-v2 build cannot read a bare
+/// tick count as the old two-field shape, so a v2 file must be refused by an
+/// older build rather than mis-parsed — the `TooNew` path below already does
+/// that, unchanged.
+pub const FORMAT_VERSION: u32 = 2;
 
 fn default_format_version() -> u32 {
     1
@@ -72,8 +79,15 @@ impl NoteValue {
     }
 }
 
+/// Augmentation dots the interface allows.
+pub const MAX_DOTS: u8 = 3;
+
 /// A note value plus augmentation dots.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// On the wire (`.gtab` format v2+) this is a plain tick count, not
+/// `{"base": ..., "dots": ...}` — see the hand-written `Serialize`/`Deserialize`
+/// below, and [`Dur::ticks`] / [`Dur::from_ticks`] for the conversion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Dur {
     pub base: NoteValue,
     pub dots: u8,
@@ -86,6 +100,61 @@ impl Dur {
         let num = (1u64 << (self.dots + 1)) - 1;
         let den = 1u64 << self.dots;
         (base * num / den) as u32
+    }
+
+    /// Inverse of [`Dur::ticks`] — a duration's on-disk form is its tick count.
+    // ponytail: linear scan of the 24 combinations (6 values x 0..=MAX_DOTS) at load
+    // time. If tuplets ever arrive, this is where a real decode table goes.
+    pub fn from_ticks(ticks: u32) -> Option<Dur> {
+        const VALUES: [NoteValue; 6] = [
+            NoteValue::Whole,
+            NoteValue::Half,
+            NoteValue::Quarter,
+            NoteValue::Eighth,
+            NoteValue::Sixteenth,
+            NoteValue::ThirtySecond,
+        ];
+        VALUES.into_iter().find_map(|base| {
+            (0..=MAX_DOTS)
+                .map(|dots| Dur { base, dots })
+                .find(|d| d.ticks() == ticks)
+        })
+    }
+}
+
+impl Serialize for Dur {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_u32(self.ticks())
+    }
+}
+
+impl<'de> Deserialize<'de> for Dur {
+    fn deserialize<D>(deserializer: D) -> Result<Dur, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // The entire v1 compatibility story for durations: an integer is the new
+        // tick-count shape, an object is the old `{base, dots}` shape. No JSON
+        // tree rewriting anywhere else is needed because of this.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum DurWire {
+            Ticks(u32),
+            V1 {
+                base: NoteValue,
+                #[serde(default)]
+                dots: u8,
+            },
+        }
+        match DurWire::deserialize(deserializer)? {
+            DurWire::Ticks(ticks) => Dur::from_ticks(ticks).ok_or_else(|| {
+                serde::de::Error::custom(format!("not a valid duration tick count: {ticks}"))
+            }),
+            DurWire::V1 { base, dots } => Ok(Dur { base, dots }),
+        }
     }
 }
 
@@ -188,12 +257,18 @@ pub fn technique_color(t: &Technique) -> Rgb {
 }
 
 /// A single fretted note within an event.
+// ponytail: notes stay `{"string":…,"fret":…}` objects rather than `[string, fret]`
+// tuples. The tuple form would save roughly another 1.5 KB on a real file but needs
+// a hand-written Serialize/Deserialize (like Dur's above) and makes the file harder
+// to read. Upgrade path is that hand-written impl, if size ever outweighs readability.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     /// 0 = string 1 (high E, top line of the tab) .. 5 = string 6 (low E, bottom line).
     pub string: u8,
     pub fret: u8,
+    #[serde(default, skip_serializing_if = "is_default")]
     pub tech: Technique,
+    #[serde(default, skip_serializing_if = "is_default")]
     pub tie_next: bool,
 }
 
@@ -210,14 +285,16 @@ pub enum Strum {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Event {
     pub dur: Dur,
+    #[serde(default, skip_serializing_if = "is_default")]
     pub notes: Vec<Note>,
+    #[serde(default, skip_serializing_if = "is_default")]
     pub strum: Option<Strum>,
     /// Palm muting applies to everything sounding at this moment rather than to one
     /// note, and prints as a labelled dashed span over consecutive events.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub palm_mute: bool,
     /// Let ring, same span treatment.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub let_ring: bool,
 }
 
@@ -230,15 +307,17 @@ impl Event {
 /// One bar (measure) of events.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bar {
+    #[serde(default, skip_serializing_if = "is_default")]
     pub events: Vec<Event>,
     /// `None` inherits the time signature of the previous bar (default (4, 4) for bar 0).
+    #[serde(default, skip_serializing_if = "is_default")]
     pub time_sig: Option<(u8, u8)>,
     /// Opening repeat sign on this bar's left barline.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub repeat_start: bool,
     /// Closing repeat on this bar's right barline, and how many times the passage is
     /// played in total. `Some(2)` is the plain repeat; more prints as "x3", "x4".
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub repeat_end: Option<u8>,
 }
 
@@ -301,19 +380,21 @@ pub enum StaffOrder {
 pub struct Document {
     /// On-disk format version — see [`FORMAT_VERSION`]. Declared first so it
     /// leads the pretty-printed JSON; missing (pre-versioning files) reads as 1.
-    #[serde(default = "default_format_version")]
+    /// Always written as [`FORMAT_VERSION`] regardless of what the in-memory
+    /// value is, so re-saving a v1 file never mislabels v2 bytes as v1.
+    #[serde(default = "default_format_version", serialize_with = "current_version")]
     pub format_version: u32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub title: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub author: String,
     /// MIDI note numbers of the open strings, index 0 = string 1 (high E) .. index 5 =
     /// string 6 (low E).
-    #[serde(default = "default_tuning")]
+    #[serde(default = "default_tuning", skip_serializing_if = "is_std_tuning")]
     pub tuning: [u8; 6],
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub capo: u8,
-    #[serde(default = "default_tempo")]
+    #[serde(default = "default_tempo", skip_serializing_if = "is_default_tempo")]
     pub tempo: u16,
     /// Size of what is printed on the tablature staff — fret numbers and every
     /// technique glyph — multiplied by this. The string grid, the clickable
@@ -323,7 +404,7 @@ pub struct Document {
     /// 1.0 draws what versions up to 0.3.0 drew at 1.3, so a document saved by one
     /// of those and carrying an explicit value renders larger than it did — divide
     /// the old number by 1.3, or just set it back to 1.0.
-    #[serde(default = "default_scale")]
+    #[serde(default = "default_scale", skip_serializing_if = "is_unit_scale")]
     pub tab_scale: f32,
     /// Horizontal density of the music: every millimetre of note spacing in
     /// `engrave` times this. Below 1.0 packs more bars onto a line (it feeds line
@@ -332,14 +413,39 @@ pub struct Document {
     /// 1.0 is what versions up to 0.3.0 called 0.7, so a document saved by one of
     /// those and carrying an explicit value renders denser than it did — divide the
     /// old number by 0.7, or just set it back to 1.0.
-    #[serde(default = "default_scale")]
+    #[serde(default = "default_scale", skip_serializing_if = "is_unit_scale")]
     pub note_spacing: f32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub model: BlockModel,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub staff_order: StaffOrder,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub bars: Vec<Bar>,
+}
+
+/// Shared `skip_serializing_if` for every field whose on-disk absence should mean
+/// "this equals its type's default" — most of `Note`, `Event`, `Bar` and `Document`.
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
+fn is_default_tempo(v: &u16) -> bool {
+    *v == 120
+}
+
+fn is_std_tuning(v: &[u8; 6]) -> bool {
+    *v == [64, 59, 55, 50, 45, 40]
+}
+
+fn is_unit_scale(v: &f32) -> bool {
+    *v == 1.0
+}
+
+/// `serialize_with` for `format_version`: always writes [`FORMAT_VERSION`], no
+/// matter what the in-memory value is (e.g. a document loaded from an older file
+/// and not yet re-saved still holds the version it was loaded as).
+fn current_version<S: serde::Serializer>(_: &u32, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_u32(FORMAT_VERSION)
 }
 
 fn default_tuning() -> [u8; 6] {
@@ -361,8 +467,13 @@ impl Document {
     /// The version is read on its own first: a future format need not
     /// deserialise into today's `Document`, but it is still a JSON object with a
     /// `format_version` key, so a too-new file is reported as such rather than as
-    /// corrupt. When `FORMAT_VERSION` moves past 1, migrate older JSON up to the
-    /// current shape between the probe and the final parse below.
+    /// corrupt. A version bump does not always need a migration step here: v1 to
+    /// v2 needed none, carried instead by `Dur`'s untagged `Deserialize` (reads
+    /// both the old `{base, dots}` shape and the new tick count) plus
+    /// `#[serde(default)]` on every field v2 stopped writing — see the "Change
+    /// the save format" recipe in CLAUDE.md. When a future bump does need one,
+    /// migrate older JSON up to the current shape between the probe and the
+    /// final parse below.
     pub fn from_json(s: &str) -> Result<Document, LoadError> {
         #[derive(Deserialize)]
         struct Probe {
@@ -374,6 +485,14 @@ impl Document {
             return Err(LoadError::TooNew(probe.format_version));
         }
         serde_json::from_str(s).map_err(|_| LoadError::Parse)
+    }
+
+    /// Serialise this document the way every `.gtab` is written: pretty-printed
+    /// JSON, always declaring the current [`FORMAT_VERSION`]. `main.rs`'s save
+    /// path goes through this rather than calling `serde_json::to_string_pretty`
+    /// itself, so the write policy lives beside the read policy above.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
     }
 
     /// Sounding MIDI pitch of `note`, given this document's tuning and capo.
