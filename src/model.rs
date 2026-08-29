@@ -12,6 +12,30 @@ use crate::Rgb;
 /// note is exactly 960 ticks and dotted/future-tuplet values stay integers.
 pub const TICKS_WHOLE: u32 = 3840;
 
+/// On-disk format version, written into every `.gtab` as `format_version`.
+///
+/// Bump this only when the shape of the saved JSON changes in a way this build's
+/// `Document` can't deserialise straight (a field renamed or removed, a type
+/// changed, an enum reworked); adding a field with `#[serde(default)]` does not
+/// need a bump. A file with no `format_version` key predates versioning and is
+/// treated as version 1. See [`Document::from_json`] for the read path and the
+/// migration seam.
+pub const FORMAT_VERSION: u32 = 1;
+
+fn default_format_version() -> u32 {
+    1
+}
+
+/// Why a `.gtab` failed to load.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LoadError {
+    /// Not valid document JSON (truncated, hand-mangled, not a `.gtab` at all).
+    Parse,
+    /// `format_version` is newer than [`FORMAT_VERSION`] — a file from a later
+    /// build of Strungin. The number is the version the file claims.
+    TooNew(u32),
+}
+
 /// The base note value, before augmentation dots are applied.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NoteValue {
@@ -275,6 +299,10 @@ pub enum StaffOrder {
 /// A complete tablature document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
+    /// On-disk format version — see [`FORMAT_VERSION`]. Declared first so it
+    /// leads the pretty-printed JSON; missing (pre-versioning files) reads as 1.
+    #[serde(default = "default_format_version")]
+    pub format_version: u32,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -327,6 +355,27 @@ fn default_scale() -> f32 {
 }
 
 impl Document {
+    /// Parse a `.gtab`'s JSON, refusing a file written by a newer format than
+    /// this build understands.
+    ///
+    /// The version is read on its own first: a future format need not
+    /// deserialise into today's `Document`, but it is still a JSON object with a
+    /// `format_version` key, so a too-new file is reported as such rather than as
+    /// corrupt. When `FORMAT_VERSION` moves past 1, migrate older JSON up to the
+    /// current shape between the probe and the final parse below.
+    pub fn from_json(s: &str) -> Result<Document, LoadError> {
+        #[derive(Deserialize)]
+        struct Probe {
+            #[serde(default = "default_format_version")]
+            format_version: u32,
+        }
+        let probe: Probe = serde_json::from_str(s).map_err(|_| LoadError::Parse)?;
+        if probe.format_version > FORMAT_VERSION {
+            return Err(LoadError::TooNew(probe.format_version));
+        }
+        serde_json::from_str(s).map_err(|_| LoadError::Parse)
+    }
+
     /// Sounding MIDI pitch of `note`, given this document's tuning and capo.
     pub fn pitch(&self, note: &Note) -> u8 {
         self.tuning[note.string as usize] + note.fret + self.capo
@@ -349,6 +398,7 @@ impl Document {
             .map(|i| Bar::new_empty(if i == 0 { Some((4, 4)) } else { None }))
             .collect();
         Document {
+            format_version: FORMAT_VERSION,
             title: String::new(),
             author: String::new(),
             tuning: default_tuning(),

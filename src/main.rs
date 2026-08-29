@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use eframe::egui;
 use strungin::i18n::{self, t};
-use strungin::model::{technique_color, BlockModel, Document, StaffOrder, Technique};
+use strungin::model::{technique_color, BlockModel, Document, LoadError, StaffOrder, Technique};
 
 const SHORTCUT_NEW: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
@@ -76,7 +76,7 @@ fn load_cover_rgba() -> (Vec<u8>, u32, u32) {
 fn run_export(input: &str, output: &str) -> Result<(), String> {
     let doc: Document = std::fs::read_to_string(input)
         .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|s| Document::from_json(&s).ok())
         .ok_or_else(|| format!("{}: {input}", t("error.load")))?;
     let bytes = strungin::pdf::export(&doc);
     std::fs::write(output, bytes).map_err(|_| format!("{}: {output}", t("error.save")))
@@ -273,15 +273,16 @@ impl TablaturesApp {
         };
         match std::fs::read_to_string(&path)
             .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .map(|s| Document::from_json(&s))
         {
-            Some(doc) => {
+            Some(Ok(doc)) => {
                 self.doc = doc;
                 self.path = Some(path);
                 self.dirty = false;
                 self.status_msg = None;
             }
-            None => self.status_msg = Some(t("error.load")),
+            Some(Err(LoadError::TooNew(_))) => self.status_msg = Some(t("error.load_too_new")),
+            Some(Err(LoadError::Parse)) | None => self.status_msg = Some(t("error.load")),
         }
     }
 

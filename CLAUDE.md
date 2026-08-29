@@ -137,6 +137,13 @@ sheet.
 row stacking) and in `tablature::shows_rhythm` — a block with no notation staff must carry its own
 rhythm stems, or it says which frets to play but never when.
 
+**Change the save format.** `.gtab` is `serde_json` of `Document`, carrying `format_version`
+(`model::FORMAT_VERSION`). Adding a field with `#[serde(default)]` needs no bump — old files still
+load. Renaming/removing a field, or changing a type, is a breaking change: bump `FORMAT_VERSION`,
+and in `Document::from_json` (between the version probe and the final parse) migrate the older JSON
+up to today's shape. Every load goes through `from_json`; a file claiming a newer version than this
+build is refused (`LoadError::TooNew`), not parsed with fields silently dropped.
+
 **Change how something is engraved.** Everything rhythmic (what gets beamed, how wide a note is) is
 in `engrave.rs` and is unit-tested in `tests/engraving.rs`. Everything visual is in `notation.rs` /
 `tablature.rs` and is checked by eye — see below.

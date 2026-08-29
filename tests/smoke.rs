@@ -1,6 +1,8 @@
 //! Integration tests against the public `tablatures` crate API.
 
-use strungin::model::{Bar, BlockModel, Document, Dur, Event, Note, NoteValue, Technique};
+use strungin::model::{
+    Bar, BlockModel, Document, Dur, Event, LoadError, Note, NoteValue, Technique, FORMAT_VERSION,
+};
 use strungin::{engrave, i18n, layout, pdf};
 
 #[test]
@@ -104,6 +106,33 @@ fn old_json_without_new_fields_still_loads() {
     assert_eq!(doc.tuning, [64, 59, 55, 50, 45, 40]);
     assert_eq!(doc.tempo, 120);
     assert_eq!((doc.tab_scale, doc.note_spacing), (1.0, 1.0));
+}
+
+#[test]
+fn from_json_versions_the_format() {
+    // A file with no version key predates versioning: load it as version 1.
+    let unversioned = Document::from_json(r#"{"title": "Old Doc"}"#).expect("unversioned loads");
+    assert_eq!(unversioned.format_version, 1);
+
+    // A current save round-trips and carries the current version.
+    let json = serde_json::to_string_pretty(&Document::new_empty()).unwrap();
+    assert_eq!(
+        Document::from_json(&json).unwrap().format_version,
+        FORMAT_VERSION
+    );
+
+    // A file from a newer build is refused, not silently parsed with fields dropped.
+    let future = format!(
+        r#"{{"format_version": {}, "title": "x"}}"#,
+        FORMAT_VERSION + 1
+    );
+    assert_eq!(
+        Document::from_json(&future),
+        Err(LoadError::TooNew(FORMAT_VERSION + 1))
+    );
+
+    // Garbage is a parse error.
+    assert_eq!(Document::from_json("not json"), Err(LoadError::Parse));
 }
 
 #[test]
