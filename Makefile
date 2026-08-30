@@ -1,15 +1,17 @@
-.PHONY: help run build app examples test fmt lint clean
+.PHONY: help run build app examples test fmt lint clean \
+	dist-cross dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64
 
 help:
 	@echo "Strungin — available targets:"
-	@echo "  run       cargo run (opens the app window)"
-	@echo "  build     cargo build --release, copy the binary into dist/"
-	@echo "  app       bundle dist/Strungin.app (Info.plist + icon + binary) — macOS only"
-	@echo "  examples  regenerate exemples/*.pdf via --export"
-	@echo "  test      cargo test"
-	@echo "  fmt       cargo fmt"
-	@echo "  lint      cargo clippy --all-targets -- -D warnings"
-	@echo "  clean     cargo clean && rm -rf dist/* build"
+	@echo "  run         cargo run (opens the app window)"
+	@echo "  build       cargo build --release, copy the binary into dist/"
+	@echo "  app         bundle dist/Strungin.app (Info.plist + icon + binary) — macOS only"
+	@echo "  examples    regenerate exemples/*.pdf via --export"
+	@echo "  dist-cross  cross-build Windows + Linux, amd64 + arm64, into dist/<platform>/"
+	@echo "  test        cargo test"
+	@echo "  fmt         cargo fmt"
+	@echo "  lint        cargo clippy --all-targets -- -D warnings"
+	@echo "  clean       cargo clean && rm -rf dist/* build"
 
 run:
 	cargo run
@@ -34,6 +36,28 @@ endif
 	cp image.icns dist/Strungin.app/Contents/Resources/Strungin.icns
 	printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n<key>CFBundleName</key>\n<string>Strungin</string>\n<key>CFBundleDisplayName</key>\n<string>Strungin</string>\n<key>CFBundleIdentifier</key>\n<string>com.nicoolaj.strungin</string>\n<key>CFBundleExecutable</key>\n<string>strungin</string>\n<key>CFBundleIconFile</key>\n<string>Strungin</string>\n<key>CFBundlePackageType</key>\n<string>APPL</string>\n<key>CFBundleShortVersionString</key>\n<string>0.3.0</string>\n<key>CFBundleVersion</key>\n<string>1</string>\n<key>NSHighResolutionCapable</key>\n<true/>\n<key>CFBundleDocumentTypes</key>\n<array>\n<dict>\n<key>CFBundleTypeName</key>\n<string>Strungin Tablature</string>\n<key>CFBundleTypeExtensions</key>\n<array><string>gtab</string></array>\n<key>CFBundleTypeRole</key>\n<string>Editor</string>\n<key>LSHandlerRank</key>\n<string>Owner</string>\n</dict>\n</array>\n</dict>\n</plist>\n' > dist/Strungin.app/Contents/Info.plist
 	@echo "Bundle ready: dist/Strungin.app"
+
+# --- Cross-compilation: Windows + Linux, amd64 + arm64 ---------------------
+# One-time setup on the build host:
+#     cargo install cargo-zigbuild && brew install zig   (or: apt/pkg install zig)
+# zig is the cross-linker and bundles libc + mingw-w64 headers for all four
+# targets, so no target sysroot is needed. eframe's glow (OpenGL) renderer and
+# winit both dlopen their system libs at runtime, so the Linux builds need no
+# X11/Wayland dev packages at build time either.
+CROSS_win-amd64   := x86_64-pc-windows-gnu
+CROSS_win-arm64   := aarch64-pc-windows-gnullvm
+CROSS_linux-amd64 := x86_64-unknown-linux-gnu
+CROSS_linux-arm64 := aarch64-unknown-linux-gnu
+
+dist-cross: dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64
+	@echo "Cross builds ready under dist/"
+
+dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64: dist-%:
+	rustup target add $(CROSS_$*)
+	cargo zigbuild --release --target $(CROSS_$*)
+	mkdir -p dist/$*
+	cp target/$(CROSS_$*)/release/strungin$(if $(findstring win,$*),.exe,) dist/$*/
+	@echo "Built dist/$*/"
 
 # Regenerates exemples/*.pdf from exemples/*.gtab via the --export CLI -- no window.
 examples: build

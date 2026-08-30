@@ -1,6 +1,6 @@
 [package]
 name = "strungin"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 authors = ["Nicolas Jalibert <nicoolaj@gmail.com>"]
 description = "Six-string guitar tablature editor: place notes by mouse, print an A4 PDF"
