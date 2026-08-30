@@ -1,4 +1,4 @@
-.PHONY: help run build app examples test fmt lint clean \
+.PHONY: help run build app examples test fmt lint clean check-zigbuild \
 	dist-cross dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64
 
 help:
@@ -52,7 +52,11 @@ CROSS_linux-arm64 := aarch64-unknown-linux-gnu
 dist-cross: dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64
 	@echo "Cross builds ready under dist/"
 
-dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64: dist-%:
+check-zigbuild:
+	@cargo zigbuild --help >/dev/null 2>&1 || { echo "cargo-zigbuild missing — run: cargo install cargo-zigbuild"; exit 1; }
+	@command -v zig >/dev/null 2>&1 || { echo "zig missing — run: brew install zig (or apt/pkg install zig)"; exit 1; }
+
+dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64: dist-%: check-zigbuild
 	rustup target add $(CROSS_$*)
 	cargo zigbuild --release --target $(CROSS_$*)
 	mkdir -p dist/$*
