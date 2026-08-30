@@ -50,6 +50,10 @@ pub struct EditorState {
     pub tech_shown: u32,
     digit_buffer: String,
     digit_deadline: Option<f64>,
+    /// Set by `set_sel` whenever the selection changes; consumed (and cleared) the
+    /// next time the selection highlight is drawn, so the view scrolls to follow
+    /// the cursor without fighting the user's own mouse-wheel scrolling.
+    scroll_to_sel: bool,
     undo_stack: Vec<Document>,
 }
 
@@ -73,6 +77,7 @@ impl Default for EditorState {
             tech_shown: u32::MAX,
             digit_buffer: String::new(),
             digit_deadline: None,
+            scroll_to_sel: false,
             undo_stack: Vec::new(),
         }
     }
@@ -284,16 +289,31 @@ fn draw_highlight(
     index: usize,
     hit: &tablature::Hit,
     color: egui::Color32,
-) {
+) -> egui::Rect {
     let rect = page_rect(content_min, index, zoom);
     let min = to_screen(rect, zoom, strungin::P::new(hit.min.x, hit.max.y));
     let max = to_screen(rect, zoom, strungin::P::new(hit.max.x, hit.min.y));
-    painter.rect_filled(egui::Rect::from_min_max(min, max), 2.0, color);
+    let highlight = egui::Rect::from_min_max(min, max);
+    painter.rect_filled(highlight, 2.0, color);
+    highlight
+}
+
+/// The one gate every write to `state.selected` must go through (`move_selection`
+/// and the click handler in `show`): a fret typed for one cell must never leak
+/// into the next, so any change of cell drops the in-progress digit buffer, and
+/// any change of cell asks the view to scroll the new cell into sight.
+fn set_sel(state: &mut EditorState, sel: Option<Sel>) {
+    if state.selected != sel {
+        state.digit_buffer.clear();
+        state.digit_deadline = None;
+        state.scroll_to_sel = true;
+    }
+    state.selected = sel;
 }
 
 fn move_selection(state: &mut EditorState, doc: &Document, key: egui::Key) {
     let Some(sel) = state.selected else { return };
-    state.selected = Some(match key {
+    let next = match key {
         egui::Key::ArrowUp => Sel {
             string: sel.string.saturating_sub(1),
             ..sel
@@ -305,7 +325,8 @@ fn move_selection(state: &mut EditorState, doc: &Document, key: egui::Key) {
         egui::Key::ArrowLeft => prev_cell(doc, sel),
         egui::Key::ArrowRight => next_cell(doc, sel),
         _ => sel,
-    });
+    };
+    set_sel(state, Some(next));
 }
 
 fn prev_cell(doc: &Document, sel: Sel) -> Sel {
@@ -403,6 +424,60 @@ fn handle_digit(state: &mut EditorState, doc: &mut Document, digit: u32, now: f6
     true
 }
 
+/// `NoteValue` variants ordered longest to shortest, matching both the palette
+/// row and `NoteValue`'s own declaration order.
+const NOTE_VALUES: [NoteValue; 6] = [
+    NoteValue::Whole,
+    NoteValue::Half,
+    NoteValue::Quarter,
+    NoteValue::Eighth,
+    NoteValue::Sixteenth,
+    NoteValue::ThirtySecond,
+];
+
+/// One step shorter (`shorter: true`) or longer than `v`, clamped at both ends:
+/// there is no wraparound, so `-` on a thirty-second note (or `+` on a whole
+/// note) does nothing.
+fn step_value(v: NoteValue, shorter: bool) -> NoteValue {
+    let i = NOTE_VALUES.iter().position(|&x| x == v).unwrap_or(0);
+    let j = if shorter { i + 1 } else { i.wrapping_sub(1) };
+    NOTE_VALUES.get(j).copied().unwrap_or(v)
+}
+
+/// The selected event's current duration, or the default if there's no event
+/// there. Both the duration keys and the two palette widgets read the half of
+/// `Dur` they are *not* currently changing from here (never from
+/// `state.tool_value`), so pressing `-` or dragging the dot count doesn't
+/// clobber the other half.
+fn selected_dur(doc: &Document, sel: Sel) -> model::Dur {
+    doc.bars
+        .get(sel.bar)
+        .and_then(|b| b.events.get(sel.event))
+        .map(|e| e.dur)
+        .unwrap_or_default()
+}
+
+/// Apply `dur` to the selected event exactly as the value and dot widgets in
+/// the palette do: absorb the change locally, or push the rest of the piece
+/// forward when `state.shift_following` is set. Shared by those two widgets and
+/// the `-`/`+`/`.` keyboard shortcuts. Returns whether it did anything, so
+/// callers know whether to mark the document changed.
+fn apply_dur(state: &mut EditorState, doc: &mut Document, dur: model::Dur) -> bool {
+    let Some(sel) = state.selected else {
+        return false;
+    };
+    let sig = doc.time_sig_at(sel.bar);
+    let shift_following = state.shift_following;
+    mutate(state, doc, move |doc| {
+        if shift_following {
+            engrave::shift_event_dur(doc, sel.bar, sel.event, dur);
+        } else if let Some(bar) = doc.bars.get_mut(sel.bar) {
+            engrave::set_event_dur(bar, sig, sel.event, dur);
+        }
+    });
+    true
+}
+
 /// The canvas viewport: a scrollable, zoomable stack of pages, mouse hit-testing,
 /// and the keyboard editing that happens while looking at it (fret digits,
 /// backspace, space, arrow-key navigation). Returns `Some(Action::Changed)` the
@@ -437,6 +512,41 @@ pub fn show(
             let bg = ui.visuals().extreme_bg_color;
             let (rect, response) =
                 ui.allocate_exact_size(content_size.max(ui.available_size()), egui::Sense::click());
+
+            // egui treats an unmodified arrow key as directional focus navigation
+            // (jumping focus to the nearest widget in that direction) unless the
+            // focused widget opts out via an EventFilter -- without this, the first
+            // arrow press hands focus to a palette button or DragValue and keyboard
+            // entry stops dead. Reclaim focus the moment nothing else holds it, and
+            // lock out that navigation for as long as we have it. `tab`/`escape`
+            // stay false: Tab still reaches the toolbar's text fields, and Escape
+            // still surrenders focus back to us.
+            //
+            // ponytail: `set_focus_lock_filter` only takes hold once this widget
+            // already had focus on the *previous* frame (egui's own guard against
+            // locking a filter in before focus is confirmed), so the one frame
+            // where we reclaim focus from nobody is briefly unprotected. Only
+            // reachable if a cold app's very first-ever input is an arrow key with
+            // no prior click; upgrade path is to stop relying on public egui API
+            // and reach into `Memory`'s private focus state directly, if that ever
+            // becomes necessary.
+            if ui.ctx().memory(|m| m.focused().is_none()) {
+                response.request_focus();
+            }
+            if response.has_focus() {
+                ui.ctx().memory_mut(|m| {
+                    m.set_focus_lock_filter(
+                        response.id,
+                        egui::EventFilter {
+                            tab: false,
+                            horizontal_arrows: true,
+                            vertical_arrows: true,
+                            escape: false,
+                        },
+                    )
+                });
+            }
+
             ui.painter().rect_filled(rect, 0.0, bg);
             let painter = ui.painter_at(rect);
             let content_min = rect.min;
@@ -471,7 +581,7 @@ pub fn show(
             }
             if let Some(sel) = state.selected {
                 if let Some((index, hit)) = find_hit(pages, sel) {
-                    draw_highlight(
+                    let rect = draw_highlight(
                         &painter,
                         content_min,
                         state.zoom,
@@ -479,13 +589,18 @@ pub fn show(
                         hit,
                         ACCENT.gamma_multiply(0.55),
                     );
+                    if state.scroll_to_sel {
+                        ui.scroll_to_rect(rect, None);
+                        state.scroll_to_sel = false;
+                    }
                 }
             }
 
             if response.clicked() {
                 response.request_focus();
                 if let Some(p) = response.interact_pointer_pos() {
-                    state.selected = pick(pages, content_min, state.zoom, p);
+                    let sel = pick(pages, content_min, state.zoom, p);
+                    set_sel(state, sel);
                 }
             }
 
@@ -493,6 +608,23 @@ pub fn show(
                 let now = ui.input(|i| i.time);
                 let events = ui.ctx().input(|i| i.events.clone());
                 for ev in events {
+                    // A fresh document starts with no selection, so the very first
+                    // editing keystroke needs somewhere to land.
+                    if state.selected.is_none()
+                        && matches!(
+                            ev,
+                            egui::Event::Text(_) | egui::Event::Key { pressed: true, .. }
+                        )
+                    {
+                        set_sel(
+                            state,
+                            Some(Sel {
+                                bar: 0,
+                                event: 0,
+                                string: 0,
+                            }),
+                        );
+                    }
                     match ev {
                         egui::Event::Text(txt) => {
                             for ch in txt.chars() {
@@ -550,6 +682,50 @@ pub fn show(
                         ) =>
                         {
                             move_selection(state, doc, key);
+                        }
+                        egui::Event::Key {
+                            key, pressed: true, ..
+                        } if matches!(
+                            key,
+                            egui::Key::Minus | egui::Key::Plus | egui::Key::Equals
+                        ) =>
+                        {
+                            if let Some(sel) = state.selected {
+                                let current = selected_dur(doc, sel);
+                                let base = step_value(current.base, key == egui::Key::Minus);
+                                state.tool_value.base = base;
+                                if apply_dur(
+                                    state,
+                                    doc,
+                                    model::Dur {
+                                        base,
+                                        dots: current.dots,
+                                    },
+                                ) {
+                                    action = Some(Action::Changed);
+                                }
+                            }
+                        }
+                        egui::Event::Key {
+                            key: egui::Key::Period,
+                            pressed: true,
+                            ..
+                        } => {
+                            if let Some(sel) = state.selected {
+                                let current = selected_dur(doc, sel);
+                                let dots = (current.dots + 1) % (MAX_DOTS + 1);
+                                state.tool_value.dots = dots;
+                                if apply_dur(
+                                    state,
+                                    doc,
+                                    model::Dur {
+                                        base: current.base,
+                                        dots,
+                                    },
+                                ) {
+                                    action = Some(Action::Changed);
+                                }
+                            }
                         }
                         _ => {}
                     }
@@ -643,36 +819,17 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     // lives in the Edit menu now, mirrored by the status bar's "INS" light.
     ui.label(t("tool.value"));
     ui.horizontal_wrapped(|ui| {
-        for v in [
-            NoteValue::Whole,
-            NoteValue::Half,
-            NoteValue::Quarter,
-            NoteValue::Eighth,
-            NoteValue::Sixteenth,
-            NoteValue::ThirtySecond,
-        ] {
+        for v in NOTE_VALUES {
             let armed = state.tool_value.base == v;
             if ui
                 .selectable_label(armed, strungin::i18n::value_name(v))
                 .clicked()
             {
                 state.tool_value.base = v;
-                if let Some(sel) = sel {
-                    let sig = doc.time_sig_at(sel.bar);
-                    let dots = doc
-                        .bars
-                        .get(sel.bar)
-                        .and_then(|b| b.events.get(sel.event))
-                        .map_or(0, |e| e.dur.dots);
-                    let shift_following = state.shift_following;
-                    mutate(state, doc, move |doc| {
-                        let dur = model::Dur { base: v, dots };
-                        if shift_following {
-                            engrave::shift_event_dur(doc, sel.bar, sel.event, dur);
-                        } else if let Some(bar) = doc.bars.get_mut(sel.bar) {
-                            engrave::set_event_dur(bar, sig, sel.event, dur);
-                        }
-                    });
+                let dots = sel
+                    .and_then(|s| doc.bars.get(s.bar).and_then(|b| b.events.get(s.event)))
+                    .map_or(0, |e| e.dur.dots);
+                if apply_dur(state, doc, model::Dur { base: v, dots }) {
                     action = Some(Action::Changed);
                 }
             }
@@ -685,22 +842,10 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
             .changed()
         {
             let dots = state.tool_value.dots;
-            if let Some(sel) = sel {
-                let sig = doc.time_sig_at(sel.bar);
-                let base = doc
-                    .bars
-                    .get(sel.bar)
-                    .and_then(|b| b.events.get(sel.event))
-                    .map_or(NoteValue::default(), |e| e.dur.base);
-                let shift_following = state.shift_following;
-                mutate(state, doc, move |doc| {
-                    let dur = model::Dur { base, dots };
-                    if shift_following {
-                        engrave::shift_event_dur(doc, sel.bar, sel.event, dur);
-                    } else if let Some(bar) = doc.bars.get_mut(sel.bar) {
-                        engrave::set_event_dur(bar, sig, sel.event, dur);
-                    }
-                });
+            let base = sel
+                .and_then(|s| doc.bars.get(s.bar).and_then(|b| b.events.get(s.event)))
+                .map_or(NoteValue::default(), |e| e.dur.base);
+            if apply_dur(state, doc, model::Dur { base, dots }) {
                 action = Some(Action::Changed);
             }
         }
@@ -1112,5 +1257,50 @@ mod tests {
         );
         assert_eq!(bar.events[0].notes[0].fret, 7);
         assert_eq!(bar.events.len(), 4, "no rest was inserted");
+    }
+
+    #[test]
+    fn digit_buffer_does_not_leak_across_cells() {
+        let mut doc = Document::new_empty();
+        let mut state = EditorState {
+            selected: Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 0,
+            }),
+            ..Default::default()
+        };
+        assert!(handle_digit(&mut state, &mut doc, 1, 0.0));
+        set_sel(
+            &mut state,
+            Some(Sel {
+                bar: 0,
+                event: 1,
+                string: 0,
+            }),
+        );
+        // Still inside DIGIT_WINDOW_SECS: without the fix this combines with the
+        // leftover "1" into fret 12 instead of landing fret 2 on its own cell.
+        assert!(handle_digit(&mut state, &mut doc, 2, 0.1));
+
+        let bar = &doc.bars[0];
+        assert_eq!(bar.events[0].notes[0].fret, 1);
+        assert_eq!(bar.events[1].notes[0].fret, 2);
+    }
+
+    #[test]
+    fn duration_keys_step_through_the_values() {
+        assert_eq!(step_value(NoteValue::Quarter, true), NoteValue::Eighth);
+        assert_eq!(step_value(NoteValue::Eighth, false), NoteValue::Quarter);
+        assert_eq!(
+            step_value(NoteValue::Whole, false),
+            NoteValue::Whole,
+            "longer than Whole clamps instead of wrapping"
+        );
+        assert_eq!(
+            step_value(NoteValue::ThirtySecond, true),
+            NoteValue::ThirtySecond,
+            "shorter than ThirtySecond clamps instead of wrapping"
+        );
     }
 }

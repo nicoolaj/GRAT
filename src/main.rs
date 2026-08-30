@@ -840,6 +840,7 @@ impl eframe::App for TablaturesApp {
                     "help.key_backspace",
                     "help.key_space",
                     "help.key_arrows",
+                    "help.key_duration",
                     "help.key_zoom",
                 ] {
                     ui.label(t(key));
