@@ -39,12 +39,16 @@ pub struct EditorState {
     /// pushes the rest of the piece forward instead of absorbing locally. Digit
     /// entry ignores this -- see the comment in `handle_digit`.
     pub shift_following: bool,
-    /// Armed value for Bend / Bend-and-release / Pre-bend.
-    pub bend_quarters: u8,
-    /// Armed value for Trill.
-    pub trill_to_fret: u8,
     /// Armed value for SlideIn's departure fret.
     pub slide_from_fret: u8,
+    /// Armed value for Bend.
+    pub bend_quarters: u8,
+    /// Armed value for Bend-and-release.
+    pub bend_release_quarters: u8,
+    /// Armed value for Pre-bend.
+    pub pre_bend_quarters: u8,
+    /// Armed value for Trill.
+    pub trill_to_fret: u8,
     /// One bit per `TECH_LEGEND` entry: the technique buttons the palette shows.
     /// Edited from Edit > note styles, remembered across sessions.
     pub tech_shown: u32,
@@ -71,9 +75,11 @@ impl Default for EditorState {
                 dots: 0,
             },
             shift_following: false,
-            bend_quarters: 2,
-            trill_to_fret: 0,
             slide_from_fret: 2,
+            bend_quarters: 2,
+            bend_release_quarters: 2,
+            pre_bend_quarters: 2,
+            trill_to_fret: 0,
             tech_shown: u32::MAX,
             digit_buffer: String::new(),
             digit_deadline: None,
@@ -90,13 +96,20 @@ pub enum Action {
     Changed,
 }
 
-/// Push an undo snapshot, then run the mutation. "Push before each mutation,
-/// twenty entries is plenty" — the cheap version on purpose, no command pattern.
-fn mutate(state: &mut EditorState, doc: &mut Document, f: impl FnOnce(&mut Document)) {
+/// Push an undo snapshot. "Push before each mutation, twenty entries is plenty" --
+/// the cheap version on purpose, no command pattern. Split out from `mutate` so a
+/// multi-frame drag can snapshot once at drag-start and then write straight through
+/// every following frame, instead of flooding the 20-deep stack in 20 frames.
+fn snapshot(state: &mut EditorState, doc: &Document) {
     state.undo_stack.push(doc.clone());
     if state.undo_stack.len() > UNDO_DEPTH {
         state.undo_stack.remove(0);
     }
+}
+
+/// Push an undo snapshot, then run the mutation.
+fn mutate(state: &mut EditorState, doc: &mut Document, f: impl FnOnce(&mut Document)) {
+    snapshot(state, doc);
     f(doc);
 }
 
@@ -124,6 +137,31 @@ pub(crate) fn tech_visible(state: &EditorState, tech: &Technique) -> bool {
         .iter()
         .position(|(t, _, _)| std::mem::discriminant(t) == std::mem::discriminant(tech))
         .is_none_or(|i| state.tech_shown & (1 << i) != 0)
+}
+
+/// The armed-value field this technique reads and writes, or `None` when it carries no number.
+fn param_slot<'a>(state: &'a mut EditorState, tech: &Technique) -> Option<&'a mut u8> {
+    Some(match tech {
+        Technique::SlideIn { .. } => &mut state.slide_from_fret,
+        Technique::Bend { .. } => &mut state.bend_quarters,
+        Technique::BendRelease { .. } => &mut state.bend_release_quarters,
+        Technique::PreBend { .. } => &mut state.pre_bend_quarters,
+        Technique::Trill { .. } => &mut state.trill_to_fret,
+        _ => return None,
+    })
+}
+
+/// i18n key for a parameterised technique's number label -- a UI concern (which
+/// string names the field), so it stays out of model.rs alongside `param()`'s data.
+fn param_key(tech: &Technique) -> &'static str {
+    match tech {
+        Technique::SlideIn { .. } => "param.from_fret",
+        Technique::Bend { .. } | Technique::BendRelease { .. } | Technique::PreBend { .. } => {
+            "param.bend"
+        }
+        Technique::Trill { .. } => "param.to_fret",
+        _ => unreachable!("only called on a technique with a parameter"),
+    }
 }
 
 fn to_screen(page_rect: egui::Rect, zoom: f32, p: strungin::P) -> egui::Pos2 {
@@ -604,6 +642,47 @@ pub fn show(
                 }
             }
 
+            if response.secondary_clicked() {
+                if let Some(p) = response.interact_pointer_pos() {
+                    let sel = pick(pages, content_min, state.zoom, p);
+                    set_sel(state, sel);
+                }
+            }
+            // A `Hit` exists even for an empty cell, so only offer a menu once a
+            // real note is there and its technique actually carries a number.
+            // context_menu() has to be called every frame (not just on the click)
+            // for the popup to stay open -- it does its own secondary-click
+            // detection, so this runs unconditionally and is a no-op most frames.
+            if let Some(sel) = state.selected {
+                let param = doc
+                    .bars
+                    .get(sel.bar)
+                    .and_then(|b| b.events.get(sel.event))
+                    .and_then(|e| e.notes.iter().find(|n| n.string == sel.string))
+                    .and_then(|n| n.tech.param().map(|p| (n.tech, p)));
+                if let Some((tech, (v0, range))) = param {
+                    let mut v = v0;
+                    response.context_menu(|ui| {
+                        ui.label(t(param_key(&tech)));
+                        let dv = ui.add(egui::DragValue::new(&mut v).range(range));
+                        if dv.drag_started() || (dv.changed() && !dv.dragged()) {
+                            snapshot(state, doc);
+                        }
+                        if dv.changed() {
+                            if let Some(note) = doc
+                                .bars
+                                .get_mut(sel.bar)
+                                .and_then(|b| b.events.get_mut(sel.event))
+                                .and_then(|e| e.notes.iter_mut().find(|n| n.string == sel.string))
+                            {
+                                note.tech = note.tech.with_param(v);
+                            }
+                            action = Some(Action::Changed);
+                        }
+                    });
+                }
+            }
+
             if response.has_focus() {
                 let now = ui.input(|i| i.time);
                 let events = ui.ctx().input(|i| i.events.clone());
@@ -768,20 +847,115 @@ pub fn status(ui: &mut egui::Ui, state: &mut EditorState, pages: &[Page]) {
     }
 }
 
+/// Write `v` into `tech`'s armed slot and, when `touches_doc`, into the selected
+/// note too. `touches_doc` is decided by the caller -- it also gates whether a
+/// snapshot is worth taking, which must happen before any mutation.
+fn apply_param(
+    state: &mut EditorState,
+    doc: &mut Document,
+    action: &mut Option<Action>,
+    tech: Technique,
+    v: u8,
+    touches_doc: bool,
+) {
+    if let Some(slot) = param_slot(state, &tech) {
+        *slot = v;
+    }
+    if std::mem::discriminant(&state.tool_tech) == std::mem::discriminant(&tech) {
+        state.tool_tech = tech.with_param(v);
+    }
+    if touches_doc {
+        if let Some(sel) = state.selected {
+            if let Some(note) = doc
+                .bars
+                .get_mut(sel.bar)
+                .and_then(|b| b.events.get_mut(sel.event))
+                .and_then(|e| e.notes.iter_mut().find(|n| n.string == sel.string))
+            {
+                note.tech = note.tech.with_param(v);
+            }
+        }
+        *action = Some(Action::Changed);
+    }
+}
+
 fn tech_button(
     ui: &mut egui::Ui,
     state: &mut EditorState,
     doc: &mut Document,
-    tech: Technique,
+    mut tech: Technique,
     key: &str,
     action: &mut Option<Action>,
 ) {
     if !tech_visible(state, &tech) {
         return;
     }
+    // The call site only ever passes a placeholder number (or none) -- stamp in the
+    // current armed value here so the button and any click always agree with
+    // param_slot, and state.tool_tech can never hold a stale number.
+    if let Some(slot) = param_slot(state, &tech) {
+        tech = tech.with_param(*slot);
+    }
     let color = rgb(model::technique_color(&tech));
     let armed = std::mem::discriminant(&state.tool_tech) == std::mem::discriminant(&tech);
-    let resp = ui.add(egui::Button::new(egui::RichText::new(t(key)).color(color)).selected(armed));
+
+    let resp = match tech.param() {
+        None => ui.add(egui::Button::new(egui::RichText::new(t(key)).color(color)).selected(armed)),
+        Some((v0, range)) => {
+            let mut v = v0;
+            // A drag may only reach the selected note when that note already
+            // carries this same technique (by discriminant) -- otherwise it would
+            // silently retag the note. Decided once per frame and reused by both
+            // widgets below: only one of them can be interacted with per frame.
+            let touches_doc = state.selected.is_some_and(|sel| {
+                doc.bars
+                    .get(sel.bar)
+                    .and_then(|b| b.events.get(sel.event))
+                    .and_then(|e| e.notes.iter().find(|n| n.string == sel.string))
+                    .is_some_and(|n| {
+                        std::mem::discriminant(&n.tech) == std::mem::discriminant(&tech)
+                    })
+            });
+
+            let btn = egui::Frame::new()
+                .fill(color.gamma_multiply(0.18))
+                .corner_radius(8)
+                .inner_margin(4)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let btn = ui.add(
+                            egui::Button::new(egui::RichText::new(t(key)).color(color))
+                                .selected(armed),
+                        );
+                        let dv = ui
+                            .add(egui::DragValue::new(&mut v).range(range.clone()))
+                            .on_hover_text(t(param_key(&tech)));
+                        if touches_doc && (dv.drag_started() || (dv.changed() && !dv.dragged())) {
+                            snapshot(state, doc);
+                        }
+                        if dv.changed() {
+                            apply_param(state, doc, action, tech, v, touches_doc);
+                        }
+                        btn
+                    })
+                    .inner
+                })
+                .inner;
+
+            btn.context_menu(|ui| {
+                ui.label(t(param_key(&tech)));
+                let dv = ui.add(egui::DragValue::new(&mut v).range(range));
+                if touches_doc && (dv.drag_started() || (dv.changed() && !dv.dragged())) {
+                    snapshot(state, doc);
+                }
+                if dv.changed() {
+                    apply_param(state, doc, action, tech, v, touches_doc);
+                }
+            });
+            btn
+        }
+    };
+
     if resp.clicked() {
         state.tool_tech = tech;
         if let Some(sel) = state.selected {
@@ -896,26 +1070,21 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         "tech.slide_shift",
         &mut action,
     );
-    let sf = state.slide_from_fret;
     tech_button(
         ui,
         state,
         doc,
-        Technique::SlideIn { from_fret: sf },
+        Technique::SlideIn { from_fret: 0 },
         "tech.slide_in",
         &mut action,
     );
-    if tech_visible(state, &Technique::SlideIn { from_fret: 0 }) {
-        ui.add(egui::DragValue::new(&mut state.slide_from_fret).range(0..=24));
-    }
     tech_button(ui, state, doc, Technique::Grace, "tech.grace", &mut action);
 
-    let bq = state.bend_quarters;
     tech_button(
         ui,
         state,
         doc,
-        Technique::Bend { quarters: bq },
+        Technique::Bend { quarters: 0 },
         "tech.bend",
         &mut action,
     );
@@ -923,7 +1092,7 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         ui,
         state,
         doc,
-        Technique::BendRelease { quarters: bq },
+        Technique::BendRelease { quarters: 0 },
         "tech.bend_release",
         &mut action,
     );
@@ -931,22 +1100,10 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         ui,
         state,
         doc,
-        Technique::PreBend { quarters: bq },
+        Technique::PreBend { quarters: 0 },
         "tech.pre_bend",
         &mut action,
     );
-    // Bend amount in quarters of a tone (1 = quarter, 2 = half, 4 = full) shared
-    // by all three bend techniques above -- adjustable, never hardcoded.
-    if [
-        Technique::Bend { quarters: 0 },
-        Technique::BendRelease { quarters: 0 },
-        Technique::PreBend { quarters: 0 },
-    ]
-    .iter()
-    .any(|t| tech_visible(state, t))
-    {
-        ui.add(egui::DragValue::new(&mut state.bend_quarters).range(1..=8));
-    }
 
     tech_button(
         ui,
@@ -986,19 +1143,14 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     tech_button(ui, state, doc, Technique::Dead, "tech.dead", &mut action);
     tech_button(ui, state, doc, Technique::Ghost, "tech.ghost", &mut action);
 
-    let tf = state.trill_to_fret;
     tech_button(
         ui,
         state,
         doc,
-        Technique::Trill { to_fret: tf },
+        Technique::Trill { to_fret: 0 },
         "tech.trill",
         &mut action,
     );
-    // Target fret the trill alternates up to -- likewise adjustable.
-    if tech_visible(state, &Technique::Trill { to_fret: 0 }) {
-        ui.add(egui::DragValue::new(&mut state.trill_to_fret).range(0..=24));
-    }
 
     ui.separator();
     for (strum, key) in [
@@ -1198,6 +1350,24 @@ mod tests {
                 "and hides nothing else"
             );
             state.tech_shown = u32::MAX;
+        }
+    }
+
+    #[test]
+    fn every_parameterised_technique_has_an_armed_slot() {
+        let mut state = EditorState::default();
+        for (tech, _, _) in crate::TECH_LEGEND.iter() {
+            let slot = param_slot(&mut state, tech);
+            assert_eq!(
+                tech.param().is_some(),
+                slot.is_some(),
+                "{tech:?}: param() and param_slot() disagree on whether it carries a number"
+            );
+            if let Some((_, range)) = tech.param() {
+                for v in [*range.start(), *range.end()] {
+                    assert_eq!(tech.with_param(v).param(), Some((v, range.clone())));
+                }
+            }
         }
     }
 
