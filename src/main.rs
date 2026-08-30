@@ -88,6 +88,9 @@ const TECH_LEGEND: &[(Technique, &str, &str)] = &[
 /// Which palette technique buttons are switched on, remembered across sessions.
 const TECH_SHOWN_STORAGE_KEY: &str = "tech_shown";
 
+/// The licence the About box names, so the line can be clicked through to it.
+const LICENSE_URL: &str = "https://creativecommons.org/licenses/by-nc-sa/4.0/";
+
 /// Decode and downscale the cover artwork exactly once. Shared by the window icon
 /// (built here, before the app exists) and the About/Help texture (built once in
 /// `TablaturesApp::new` from the same bytes, and kept for the app's lifetime rather
@@ -787,7 +790,7 @@ impl eframe::App for TablaturesApp {
                 ui.label(t("about.tagline"));
                 ui.separator();
                 ui.label(t("about.author_line"));
-                ui.label(t("about.license"));
+                ui.hyperlink_to(t("about.license"), LICENSE_URL);
             });
 
         // Help: the legend of technique colours -- the single most useful thing on

@@ -4,6 +4,8 @@
 //! need floating point: a whole note is [`TICKS_WHOLE`] ticks, chosen to be evenly
 //! divisible by 2, 3, 4, and 5.
 
+use std::ops::RangeInclusive;
+
 use serde::{Deserialize, Serialize};
 
 use crate::Rgb;
@@ -253,6 +255,33 @@ pub fn technique_color(t: &Technique) -> Rgb {
         Technique::Dead => COLOR_DEAD,
         Technique::Ghost => COLOR_GHOST,
         Technique::Trill { .. } => COLOR_TRILL,
+    }
+}
+
+impl Technique {
+    /// The numeric modifier this technique carries and the range it accepts.
+    /// `None` for the fifteen variants that take no number.
+    pub fn param(self) -> Option<(u8, RangeInclusive<u8>)> {
+        match self {
+            Technique::SlideIn { from_fret } => Some((from_fret, 0..=24)),
+            Technique::Bend { quarters }
+            | Technique::BendRelease { quarters }
+            | Technique::PreBend { quarters } => Some((quarters, 1..=8)),
+            Technique::Trill { to_fret } => Some((to_fret, 0..=24)),
+            _ => None,
+        }
+    }
+
+    /// The same technique carrying `v`. Unparameterised variants come back unchanged.
+    pub fn with_param(self, v: u8) -> Self {
+        match self {
+            Technique::SlideIn { .. } => Technique::SlideIn { from_fret: v },
+            Technique::Bend { .. } => Technique::Bend { quarters: v },
+            Technique::BendRelease { .. } => Technique::BendRelease { quarters: v },
+            Technique::PreBend { .. } => Technique::PreBend { quarters: v },
+            Technique::Trill { .. } => Technique::Trill { to_fret: v },
+            other => other,
+        }
     }
 }
 
