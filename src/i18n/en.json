@@ -24,7 +24,7 @@
   "dialog.open_pdf_body": "The PDF was saved. Open it now?",
   "dialog.gtab_filter": "Tablature",
   "dialog.pdf_filter": "PDF",
-  "cli.export_usage": "usage: strungin --export <in.gtab> <out.pdf>",
+  "cli.export_usage": "usage: grat --export <in.gtab> <out.pdf>",
   "about.tagline": "A 6-string guitar tablature editor.",
   "about.version": "Version",
   "about.author_line": "Nicolas Jalibert — nicoolaj@gmail.com — https://github.com/nicoolaj",

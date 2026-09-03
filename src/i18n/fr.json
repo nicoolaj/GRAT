@@ -24,7 +24,7 @@
   "dialog.open_pdf_body": "Le PDF a été enregistré. L'ouvrir maintenant ?",
   "dialog.gtab_filter": "Tablature",
   "dialog.pdf_filter": "PDF",
-  "cli.export_usage": "usage : strungin --export <entree.gtab> <sortie.pdf>",
+  "cli.export_usage": "usage : grat --export <entree.gtab> <sortie.pdf>",
   "about.tagline": "Un éditeur de tablatures pour guitare 6 cordes.",
   "about.version": "Version",
   "about.author_line": "Nicolas Jalibert — nicoolaj@gmail.com — https://github.com/nicoolaj",

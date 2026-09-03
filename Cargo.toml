@@ -1,6 +1,6 @@
 [package]
-name = "strungin"
-version = "1.7.0"
+name = "grat"
+version = "2.0.0"
 edition = "2021"
 authors = ["Nicolas Jalibert <nicoolaj@gmail.com>"]
 description = "Six-string guitar tablature editor: place notes by mouse, print an A4 PDF"
@@ -13,7 +13,7 @@ license = "CC-BY-NC-SA-4.0"
 path = "src/lib.rs"
 
 [[bin]]
-name = "strungin"
+name = "grat"
 path = "src/main.rs"
 
 [dependencies]

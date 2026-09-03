@@ -41,7 +41,7 @@ pub enum LoadError {
     /// Not valid document JSON (truncated, hand-mangled, not a `.gtab` at all).
     Parse,
     /// `format_version` is newer than [`FORMAT_VERSION`] — a file from a later
-    /// build of Strungin. The number is the version the file claims.
+    /// build of GRAT. The number is the version the file claims.
     TooNew(u32),
 }
 

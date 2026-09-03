@@ -1,6 +1,6 @@
-# Strungin
+# GRAT
 
-Strungin est un éditeur de tablatures pour guitare 6 cordes, en Rust (`egui`/`eframe`), avec saisie à la
+GRAT est un éditeur de tablatures pour guitare 6 cordes, en Rust (`egui`/`eframe`), avec saisie à la
 souris et export PDF A4 prêt à imprimer. Binaire unique, portable (macOS en priorité,
 Windows/Linux visés), thème clair/sombre suivant l'OS, interface FR/EN détectée
 automatiquement.
@@ -10,7 +10,7 @@ automatiquement.
 ```sh
 make run      # cargo run — lance la fenêtre
 make build    # cargo build --release, copie le binaire dans dist/
-make app      # (macOS) empaquette dist/Strungin.app
+make app      # (macOS) empaquette dist/GRAT.app
 make test     # cargo test
 ```
 
@@ -74,7 +74,7 @@ le modèle de données ; les fichiers v1 existants continuent de se charger tels
 |---|---|
 | `run` | `cargo run` |
 | `build` | `cargo build --release` puis copie du binaire dans `dist/` |
-| `app` | empaquette `dist/Strungin.app` (Info.plist + icône .icns + binaire) — macOS |
+| `app` | empaquette `dist/GRAT.app` (Info.plist + icône .icns + binaire) — macOS |
 | `examples` | régénère `exemples/*.pdf` via `--export` |
 | `test` | `cargo test` |
 | `fmt` | `cargo fmt` |

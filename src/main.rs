@@ -1,6 +1,6 @@
 //! Tablatures desktop app: window, theme, menu, and file/CLI wiring.
 //!
-//! The document model and i18n live in the `strungin` library crate (see `src/lib.rs`,
+//! The document model and i18n live in the `grat` library crate (see `src/lib.rs`,
 //! `src/model.rs`, `src/i18n.rs`); this binary only adds the eframe GUI shell and the
 //! `--export` CLI entry point on top of it.
 
@@ -10,8 +10,8 @@ mod live;
 use std::path::PathBuf;
 
 use eframe::egui;
-use strungin::i18n::{self, t};
-use strungin::model::{technique_color, BlockModel, Document, LoadError, StaffOrder, Technique};
+use grat::i18n::{self, t};
+use grat::model::{technique_color, BlockModel, Document, LoadError, StaffOrder, Technique};
 
 const SHORTCUT_NEW: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
@@ -141,14 +141,14 @@ fn load_cover_rgba() -> (Vec<u8>, u32, u32) {
     (img.into_raw(), w, h)
 }
 
-/// `strungin --export <in.gtab> <out.pdf>`: load, export, write, no window. Shared
+/// `grat --export <in.gtab> <out.pdf>`: load, export, write, no window. Shared
 /// entry point for the CLI flag and `make examples`.
 fn run_export(input: &str, output: &str) -> Result<(), String> {
     let doc: Document = std::fs::read_to_string(input)
         .ok()
         .and_then(|s| Document::from_json(&s).ok())
         .ok_or_else(|| format!("{}: {input}", t("error.load")))?;
-    let bytes = strungin::pdf::export(&doc);
+    let bytes = grat::pdf::export(&doc);
     std::fs::write(output, bytes).map_err(|_| format!("{}: {output}", t("error.save")))
 }
 
@@ -167,7 +167,7 @@ fn open_file(path: &std::path::Path) {
 }
 
 fn main() -> eframe::Result {
-    // CLI mode: `strungin --export <in.gtab> <out.pdf>`. Never opens a window.
+    // CLI mode: `grat --export <in.gtab> <out.pdf>`. Never opens a window.
     let args: Vec<String> = std::env::args().collect();
     if let Some(pos) = args.iter().position(|a| a == "--export") {
         let (input, output) = match (args.get(pos + 1), args.get(pos + 2)) {
@@ -413,7 +413,7 @@ impl TablaturesApp {
         else {
             return;
         };
-        match std::fs::write(&path, strungin::pdf::export(&self.doc)) {
+        match std::fs::write(&path, grat::pdf::export(&self.doc)) {
             Ok(()) => {
                 self.status_msg = None;
                 self.pending_open_pdf = Some(path);
@@ -585,12 +585,12 @@ impl TablaturesApp {
         // Keep a blank line ready under the music: as soon as the last one is
         // written on, the next appears. Not marked dirty -- the appended bars are
         // empty scaffolding, and the invariant re-establishes itself on load.
-        strungin::layout::ensure_trailing_blank_system(&mut self.doc);
+        grat::layout::ensure_trailing_blank_system(&mut self.doc);
 
         // ponytail: re-paginated every frame rather than cached and invalidated on
         // edit -- simplest correct thing for a desktop editor's document sizes;
         // revisit with a dirty-flag cache if a very large score ever feels laggy.
-        let pages = strungin::layout::paginate(&self.doc);
+        let pages = grat::layout::paginate(&self.doc);
 
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(4.0);

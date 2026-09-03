@@ -1,6 +1,6 @@
-# Strungin — guide for Claude and other agents
+# GRAT — guide for Claude and other agents
 
-Strungin is a desktop editor for six-string guitar tablature: place notes by mouse, save as JSON, print an
+GRAT is a desktop editor for six-string guitar tablature: place notes by mouse, save as JSON, print an
 A4 PDF. Rust, `eframe`/`egui`, one portable binary (macOS/Windows/Linux, ARM and x86).
 
 Author: Nicolas Jalibert <nicoolaj@gmail.com> — https://github.com/nicoolaj
@@ -14,7 +14,7 @@ make run       # cargo run — opens a window; NEVER run this from an agent sess
 make test      # cargo test
 make lint      # cargo clippy --all-targets -- -D warnings
 make build     # release binary into dist/
-make app       # dist/Strungin.app (macOS)
+make app       # dist/GRAT.app (macOS)
 make examples  # regenerate exemples/*.pdf
 ```
 
@@ -116,8 +116,8 @@ never know about pages, egui or PDF.
   Downscale to ~256 px first with `image::imageops`: the full frame is 4 MB of RGBA for something
   drawn at a fraction of that.
 - The macOS `.app` icon is `image.icns` at the repo root (hand-made, 1024×1024). `make app` just
-  copies it to `Contents/Resources/Strungin.icns` — `CFBundleIconFile` in the Info.plist is
-  `Strungin`, so the resource name must stay `Strungin.icns`.
+  copies it to `Contents/Resources/GRAT.icns` — `CFBundleIconFile` in the Info.plist is
+  `GRAT`, so the resource name must stay `GRAT.icns`.
 - **`muda` (native macOS menu bar) was tried and reverted — do not retry without checking upstream
   first.** muda 0.19.3's custom `NSMenuItem` subclass (`MudaMenuItem`) stores a raw pointer
   (`#[ivars = Cell<*const MenuChild>]`) to its Rust-side data instead of an owned/reference-counted

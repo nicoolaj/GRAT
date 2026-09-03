@@ -1,12 +1,12 @@
 //! Checks on the engraving engine: the decisions that are easy to get wrong and
 //! impossible to eyeball once a page is full of notes.
 
-use strungin::engrave::{
+use grat::engrave::{
     bar_duration_secs, bar_ticks, beam_groups, beam_runs, is_complete, metronome_beats,
     natural_bar_width, set_event_dur, set_time_sig, shift_event_dur, split_ticks, system_spacing,
     timeline, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
 };
-use strungin::model::*;
+use grat::model::*;
 
 fn note(fret: u8) -> Note {
     Note {

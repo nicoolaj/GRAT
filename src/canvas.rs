@@ -6,9 +6,9 @@
 //! file is the only place in the app that touches egui widgets directly.
 
 use eframe::egui;
-use strungin::layout::Page;
-use strungin::model::{Document, NoteValue, Strum, Technique, MAX_DOTS};
-use strungin::{engrave, i18n::t, model, staff, tablature, Align, Prim, PAGE_H_MM, PAGE_W_MM};
+use grat::layout::Page;
+use grat::model::{Document, NoteValue, Strum, Technique, MAX_DOTS};
+use grat::{engrave, i18n::t, model, staff, tablature, Align, Prim, PAGE_H_MM, PAGE_W_MM};
 
 /// Visual gap between stacked pages on screen. Screen-only: has no equivalent in
 /// the printed layout, where every page is its own sheet of paper.
@@ -125,7 +125,7 @@ pub fn undo(state: &mut EditorState, doc: &mut Document) -> bool {
     }
 }
 
-pub(crate) fn rgb(c: strungin::Rgb) -> egui::Color32 {
+pub(crate) fn rgb(c: grat::Rgb) -> egui::Color32 {
     egui::Color32::from_rgb(c.0, c.1, c.2)
 }
 
@@ -164,7 +164,7 @@ fn param_key(tech: &Technique) -> &'static str {
     }
 }
 
-pub(crate) fn to_screen(page_rect: egui::Rect, zoom: f32, p: strungin::P) -> egui::Pos2 {
+pub(crate) fn to_screen(page_rect: egui::Rect, zoom: f32, p: grat::P) -> egui::Pos2 {
     egui::pos2(
         page_rect.min.x + p.x * zoom,
         page_rect.min.y + (PAGE_H_MM - p.y) * zoom,
@@ -329,8 +329,8 @@ fn draw_highlight(
     color: egui::Color32,
 ) -> egui::Rect {
     let rect = page_rect(content_min, index, zoom);
-    let min = to_screen(rect, zoom, strungin::P::new(hit.min.x, hit.max.y));
-    let max = to_screen(rect, zoom, strungin::P::new(hit.max.x, hit.min.y));
+    let min = to_screen(rect, zoom, grat::P::new(hit.min.x, hit.max.y));
+    let max = to_screen(rect, zoom, grat::P::new(hit.max.x, hit.min.y));
     let highlight = egui::Rect::from_min_max(min, max);
     painter.rect_filled(highlight, 2.0, color);
     highlight
@@ -996,7 +996,7 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         for v in NOTE_VALUES {
             let armed = state.tool_value.base == v;
             if ui
-                .selectable_label(armed, strungin::i18n::value_name(v))
+                .selectable_label(armed, grat::i18n::value_name(v))
                 .clicked()
             {
                 state.tool_value.base = v;

@@ -5,7 +5,7 @@
 //! that the engraver produces primitives for every case, and it is the only way to
 //! actually look at beams, rests and the clef without building a PDF.
 
-use strungin::{engrave, model::*, notation, tablature, Align, Prim, P};
+use grat::{engrave, model::*, notation, tablature, Align, Prim, P};
 
 /// Millimetre page primitives to an SVG whose y axis is flipped back to screen order.
 fn svg(prims: &[Prim], w: f32, h: f32) -> String {
@@ -14,7 +14,7 @@ fn svg(prims: &[Prim], w: f32, h: f32) -> String {
          viewBox=\"0 0 {w} {h}\"><rect width=\"{w}\" height=\"{h}\" fill=\"white\"/>\
          <g transform=\"translate(0,{h}) scale(1,-1)\">"
     );
-    let hex = |c: strungin::Rgb| format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2);
+    let hex = |c: grat::Rgb| format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2);
     for p in prims {
         match p {
             Prim::Line { a, b, w, color } => s += &format!(
@@ -235,7 +235,7 @@ fn proof_sheet() {
 /// header, footer, several blocks per page, and a repeat spanning a page break.
 fn song() -> Document {
     let mut doc = Document::new_empty();
-    doc.title = "Strungin".into();
+    doc.title = "GRAT".into();
     doc.author = "Nicolas Jalibert".into();
     doc.model = BlockModel::ThreeLine;
 
@@ -275,7 +275,7 @@ fn song() -> Document {
 #[test]
 fn page_proof_sheet() {
     let doc = song();
-    let pages = strungin::layout::paginate(&doc);
+    let pages = grat::layout::paginate(&doc);
     assert!(
         pages.len() >= 2,
         "24 bars of three-row blocks need more than one page"
@@ -300,7 +300,7 @@ fn page_proof_sheet() {
                 },
                 P { x: dx, y: 297.0 },
             ],
-            color: strungin::Rgb(0xFF, 0xFF, 0xFF),
+            color: grat::Rgb(0xFF, 0xFF, 0xFF),
         });
         prims.extend(page.prims.iter().cloned().map(|p| shift(p, dx)));
     }

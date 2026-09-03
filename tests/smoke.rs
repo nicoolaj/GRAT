@@ -1,10 +1,10 @@
 //! Integration tests against the public `tablatures` crate API.
 
-use strungin::model::{
+use grat::model::{
     Bar, BlockModel, Document, Dur, Event, LoadError, Note, NoteValue, StaffOrder, Strum,
     Technique, FORMAT_VERSION, MAX_DOTS,
 };
-use strungin::{engrave, i18n, layout, pdf};
+use grat::{engrave, i18n, layout, pdf};
 
 #[test]
 fn pitch_resolves_tuning_fret_and_capo() {
@@ -515,7 +515,7 @@ fn tab_scale_grows_the_fret_numbers_but_not_the_grid() {
             .prims
             .iter()
             .find_map(|p| match p {
-                strungin::Prim::Text { s, pt, .. } if s == "2" => Some(*pt),
+                grat::Prim::Text { s, pt, .. } if s == "2" => Some(*pt),
                 _ => None,
             })
             .expect("a fret-number prim")
@@ -533,11 +533,11 @@ fn tab_scale_grows_the_fret_numbers_but_not_the_grid() {
     doc.tab_scale = 1.0;
     let (pt1, grid1) = (fret_pt(&doc), cell_h(&doc));
     assert!(
-        (pt1 - strungin::staff::pt_for_cap(2.6)).abs() < 0.01,
+        (pt1 - grat::staff::pt_for_cap(2.6)).abs() < 0.01,
         "default fret numbers should be 2.6 mm cap-high, got {pt1} pt"
     );
     assert!(
-        (strungin::engrave::natural_event_width(
+        (grat::engrave::natural_event_width(
             &Dur {
                 base: NoteValue::Quarter,
                 dots: 0
@@ -577,9 +577,9 @@ fn every_hit_is_non_empty_and_stays_on_the_page() {
             );
             assert!(
                 hit.min.x >= 0.0
-                    && hit.max.x <= strungin::PAGE_W_MM
+                    && hit.max.x <= grat::PAGE_W_MM
                     && hit.min.y >= 0.0
-                    && hit.max.y <= strungin::PAGE_H_MM,
+                    && hit.max.y <= grat::PAGE_H_MM,
                 "hit box must stay inside the A4 page: {hit:?}"
             );
         }

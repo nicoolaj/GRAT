@@ -10,11 +10,11 @@
 //! moving.
 
 use eframe::egui;
-use strungin::engrave::{Beat, Cue};
-use strungin::layout::{Page, Strip};
-use strungin::model::{self, Document};
-use strungin::tablature::Hit;
-use strungin::{engrave, i18n::t, layout, P, PAGE_H_MM, PAGE_W_MM};
+use grat::engrave::{Beat, Cue};
+use grat::layout::{Page, Strip};
+use grat::model::{self, Document};
+use grat::tablature::Hit;
+use grat::{engrave, i18n::t, layout, P, PAGE_H_MM, PAGE_W_MM};
 
 use crate::canvas::{draw_prim, page_rect, to_screen, PAGE_GAP_MM};
 use click::Audio;
