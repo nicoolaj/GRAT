@@ -124,6 +124,62 @@ pub fn paginate(doc: &Document) -> Vec<Page> {
         .collect()
 }
 
+/// The whole document laid out on one endless line, for the live player.
+///
+/// The same block, the same shared [`Spacing`], the same row renderers as a page
+/// — only the line breaking is gone. Every bar keeps its natural width, so
+/// nothing is stretched to a margin and the music passes the playhead at a
+/// steady speed.
+pub struct Strip {
+    pub prims: Vec<Prim>,
+    /// One box per string per event, exactly as on a page: the live player
+    /// highlights an event's column by taking the union of its six.
+    pub hits: Vec<tablature::Hit>,
+    /// Event positions, relative to the first barline at [`Strip::x`].
+    spacing: Spacing,
+    /// x of the first barline; the staff head is drawn in `[0, x]`.
+    pub x: f32,
+    /// The block occupies y in `[0, height]`.
+    pub height: f32,
+}
+
+impl Strip {
+    /// x of one event on the line, in strip millimetres. `bar` indexes
+    /// `Document::bars` directly: a strip holds every bar, so a bar's position in
+    /// the line and its index in the document are the same number.
+    pub fn event_x(&self, bar: usize, event: usize) -> Option<f32> {
+        self.spacing.event_x(bar, event).map(|x| self.x + x)
+    }
+
+    /// x where the music ends.
+    pub fn end_x(&self) -> f32 {
+        self.x + self.spacing.width
+    }
+}
+
+/// Lay `doc` out as a single [`Strip`].
+pub fn strip(doc: &Document) -> Strip {
+    let height = block_height(doc);
+    let spacing = engrave::system_spacing(doc, 0..doc.bars.len(), None);
+    let mut prims = Vec::new();
+    let mut hits = Vec::new();
+    place_block(
+        doc,
+        &spacing,
+        tablature::HEAD_MM,
+        height,
+        &mut prims,
+        &mut hits,
+    );
+    Strip {
+        prims,
+        hits,
+        spacing,
+        x: tablature::HEAD_MM,
+        height,
+    }
+}
+
 /// Greedy line breaking: bars pile onto a system while their natural width still
 /// fits, and every system gets at least one bar even if that one alone overflows.
 fn break_lines(doc: &Document, music_width: f32) -> Vec<Range<usize>> {

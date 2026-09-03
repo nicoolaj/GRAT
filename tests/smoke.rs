@@ -834,3 +834,47 @@ fn pdf_export_does_not_print_trailing_blank_bars() {
         "trailing blank bars must not add printed pages"
     );
 }
+
+#[test]
+fn the_live_strip_puts_every_bar_on_one_line() {
+    let mut doc = Document::new_empty();
+    for bar in doc.bars.iter_mut() {
+        bar.events[0].notes.push(Note {
+            string: 2,
+            fret: 5,
+            tech: Technique::Plain,
+            tie_next: false,
+        });
+    }
+
+    let strip = layout::strip(&doc);
+
+    // One line: as wide as every bar's natural width put together, plus the room
+    // the staff head is drawn in. Nothing is justified, nothing wraps.
+    let natural: f32 = doc
+        .bars
+        .iter()
+        .map(|b| engrave::natural_bar_width(b, doc.note_spacing))
+        .sum();
+    assert!((strip.end_x() - (strip.x + natural)).abs() < 0.01);
+    assert!(strip.height > 0.0);
+
+    // Six clickable cells per event, exactly as on a page -- the live player
+    // highlights a column by taking the union of an event's six.
+    let events: usize = doc.bars.iter().map(|b| b.events.len()).sum();
+    assert_eq!(strip.hits.len(), events * 6);
+
+    // Every event has a place on the line, and they run left to right.
+    let xs: Vec<f32> = doc
+        .bars
+        .iter()
+        .enumerate()
+        .flat_map(|(bi, b)| (0..b.events.len()).map(move |ei| (bi, ei)))
+        .map(|(bi, ei)| {
+            strip
+                .event_x(bi, ei)
+                .expect("every event sits on the strip")
+        })
+        .collect();
+    assert!(xs.windows(2).all(|w| w[1] > w[0]));
+}

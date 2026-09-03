@@ -48,6 +48,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs, strum row, rhythm stems |
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, hit boxes |
 | `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette |
+| `live.rs` | the live player: transport, the two scrolling views, the highlighter. A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. Visual only — no sound |
 | `pdf.rs` | `Prim` → printpdf ops |
 | `main.rs` | window, theme, menus, dialogs, shortcuts, `--export` CLI |
 
@@ -74,7 +75,12 @@ never know about pages, egui or PDF.
    the exception.
 7. **The library stays GUI-free.** `cargo test` and the `--export` CLI must work without opening a
    window, which is why `canvas.rs` is a module of the binary.
-8. **Fret labels contain `<`, `>`, `(`, `)`** (harmonics `<12>`, ghost notes `(5)`, trills `5(9)`).
+8. **The live player's cues, strip and pages all come from one `engrave::for_export`
+   of the document.** That call trims the editor's trailing blank bars and rewrites its
+   per-beat rests, which renumbers events — so a cue's `(bar, event)` only addresses the
+   right column if the geometry was built from the very same normalised document.
+   `LiveState::enter` builds all three together for exactly that reason; don't split it up.
+9. **Fret labels contain `<`, `>`, `(`, `)`** (harmonics `<12>`, ghost notes `(5)`, trills `5(9)`).
    Any text backend must escape for its own format — this already bit the SVG proof sheet.
 
 ## Verified API facts — do not spend a session rediscovering these

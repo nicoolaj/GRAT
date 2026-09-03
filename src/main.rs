@@ -5,6 +5,7 @@
 //! `--export` CLI entry point on top of it.
 
 mod canvas;
+mod live;
 
 use std::path::PathBuf;
 
@@ -28,6 +29,8 @@ const SHORTCUT_QUIT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
 const SHORTCUT_UNDO: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
+const SHORTCUT_LIVE: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::L);
 
 /// Every playing technique with its i18n key and the kind it belongs to, for the Help
 /// legend and the Edit > note styles submenu. One representative field value per
@@ -232,6 +235,8 @@ struct TablaturesApp {
     /// Last error or informational notice, shown in the status bar.
     status_msg: Option<String>,
     editor: canvas::EditorState,
+    /// The live player. Holds the window whenever `open`.
+    live: live::LiveState,
     /// Cover artwork, decoded once and kept as a texture for About/Help.
     cover: egui::TextureHandle,
 }
@@ -273,6 +278,7 @@ impl TablaturesApp {
             pending_open_pdf: None,
             status_msg: None,
             editor,
+            live: live::LiveState::default(),
             cover,
         }
     }
@@ -516,6 +522,15 @@ impl TablaturesApp {
                 });
 
                 ui.menu_button(t("menu.view"), |ui| {
+                    let sc_live = ui.ctx().format_shortcut(&SHORTCUT_LIVE);
+                    if ui
+                        .add(egui::Button::new(t("menu.live")).shortcut_text(sc_live))
+                        .clicked()
+                    {
+                        self.live.enter(&self.doc);
+                        ui.close();
+                    }
+                    ui.separator();
                     ui.menu_button(t("menu.language"), |ui| {
                         for lang in i18n::available_langs() {
                             let checked = i18n::current_lang() == lang;
@@ -534,55 +549,9 @@ impl TablaturesApp {
             });
         });
     }
-}
-
-fn model_label(model: BlockModel) -> String {
-    match model {
-        BlockModel::OneLine => t("model.one_line"),
-        BlockModel::TwoLine => t("model.two_line"),
-        BlockModel::ThreeLine => t("model.three_line"),
-    }
-}
-
-fn staff_order_label(order: StaffOrder) -> String {
-    match order {
-        StaffOrder::TabFirst => t("staff_order.tab_first"),
-        StaffOrder::NotationFirst => t("staff_order.notation_first"),
-    }
-}
-
-impl eframe::App for TablaturesApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // Global keyboard shortcuts: active regardless of which menu (if any) is open.
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_NEW)) {
-            self.request_new();
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_OPEN)) {
-            self.request_open();
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE)) {
-            self.do_save();
-        }
-        if ui
-            .ctx()
-            .input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE_AS))
-        {
-            self.do_save_as();
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_EXPORT)) {
-            self.do_export();
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_QUIT)) {
-            self.request_quit(ui.ctx());
-        }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_UNDO))
-            && canvas::undo(&mut self.editor, &mut self.doc)
-        {
-            self.dirty = true;
-        }
-
-        self.egui_menu_bar(ui);
-
+    /// The editor proper: the document toolbar, the tool palette, the status bar
+    /// and the page view. Skipped entirely while the live player holds the window.
+    fn editor_ui(&mut self, ui: &mut egui::Ui) {
         // Keep a blank line ready under the music: as soon as the last one is
         // written on, the next appears. Not marked dirty -- the appended bars are
         // empty scaffolding, and the invariant re-establishes itself on load.
@@ -715,6 +684,70 @@ impl eframe::App for TablaturesApp {
             });
         });
 
+        egui::CentralPanel::default()
+            .frame(egui::Frame::default())
+            .show(ui, |ui| {
+                if canvas::show(ui, &mut self.editor, &mut self.doc, &pages).is_some() {
+                    self.dirty = true;
+                }
+            });
+    }
+}
+
+fn model_label(model: BlockModel) -> String {
+    match model {
+        BlockModel::OneLine => t("model.one_line"),
+        BlockModel::TwoLine => t("model.two_line"),
+        BlockModel::ThreeLine => t("model.three_line"),
+    }
+}
+
+fn staff_order_label(order: StaffOrder) -> String {
+    match order {
+        StaffOrder::TabFirst => t("staff_order.tab_first"),
+        StaffOrder::NotationFirst => t("staff_order.notation_first"),
+    }
+}
+
+impl eframe::App for TablaturesApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Global keyboard shortcuts: active regardless of which menu (if any) is open.
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_NEW)) {
+            self.request_new();
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_OPEN)) {
+            self.request_open();
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE)) {
+            self.do_save();
+        }
+        if ui
+            .ctx()
+            .input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE_AS))
+        {
+            self.do_save_as();
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_EXPORT)) {
+            self.do_export();
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_QUIT)) {
+            self.request_quit(ui.ctx());
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_UNDO))
+            && canvas::undo(&mut self.editor, &mut self.doc)
+        {
+            self.dirty = true;
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_LIVE)) {
+            if self.live.open {
+                self.live.exit();
+            } else {
+                self.live.enter(&self.doc);
+            }
+        }
+
+        self.egui_menu_bar(ui);
+
         // Unsaved-changes confirmation, shown for New/Open/Quit while `dirty`.
         if let Some(pending) = self.pending {
             let resp = egui::Modal::new(egui::Id::new("unsaved_modal")).show(ui.ctx(), |ui| {
@@ -830,6 +863,7 @@ impl eframe::App for TablaturesApp {
                     ("menu.save_as", &SHORTCUT_SAVE_AS),
                     ("menu.export_pdf", &SHORTCUT_EXPORT),
                     ("tool.undo", &SHORTCUT_UNDO),
+                    ("menu.live", &SHORTCUT_LIVE),
                     ("menu.quit", &SHORTCUT_QUIT),
                 ] {
                     ui.label(format!(
@@ -845,6 +879,7 @@ impl eframe::App for TablaturesApp {
                     "help.key_arrows",
                     "help.key_duration",
                     "help.key_zoom",
+                    "help.key_live",
                 ] {
                     ui.label(t(key));
                 }
@@ -874,13 +909,13 @@ impl eframe::App for TablaturesApp {
                 ui.label(t("help.spans_body"));
             });
 
-        egui::CentralPanel::default()
-            .frame(egui::Frame::default())
-            .show(ui, |ui| {
-                if canvas::show(ui, &mut self.editor, &mut self.doc, &pages).is_some() {
-                    self.dirty = true;
-                }
-            });
+        // The live player takes the window over: the editor's toolbar, palette,
+        // status bar and page view all stand down while it holds it.
+        if self.live.open {
+            live::show(ui, &mut self.live, &self.doc);
+        } else {
+            self.editor_ui(ui);
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

@@ -12,7 +12,7 @@ use strungin::{engrave, i18n::t, model, staff, tablature, Align, Prim, PAGE_H_MM
 
 /// Visual gap between stacked pages on screen. Screen-only: has no equivalent in
 /// the printed layout, where every page is its own sheet of paper.
-const PAGE_GAP_MM: f32 = 10.0;
+pub(crate) const PAGE_GAP_MM: f32 = 10.0;
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x5E, 0x5C, 0xE6);
 
 /// A selected or hovered cell: one string at one event of one bar. Mirrors
@@ -164,7 +164,7 @@ fn param_key(tech: &Technique) -> &'static str {
     }
 }
 
-fn to_screen(page_rect: egui::Rect, zoom: f32, p: strungin::P) -> egui::Pos2 {
+pub(crate) fn to_screen(page_rect: egui::Rect, zoom: f32, p: strungin::P) -> egui::Pos2 {
     egui::pos2(
         page_rect.min.x + p.x * zoom,
         page_rect.min.y + (PAGE_H_MM - p.y) * zoom,
@@ -203,7 +203,7 @@ fn draw_text(
     painter.text(egui::pos2(pos.x, pos.y - ascent), anchor, text, font, color);
 }
 
-fn draw_prim(
+pub(crate) fn draw_prim(
     ctx: &egui::Context,
     painter: &egui::Painter,
     page_rect: egui::Rect,
@@ -272,7 +272,7 @@ fn draw_prim(
 }
 
 /// Screen rect of the page at `index`, given the scroll content's top-left.
-fn page_rect(content_min: egui::Pos2, index: usize, zoom: f32) -> egui::Rect {
+pub(crate) fn page_rect(content_min: egui::Pos2, index: usize, zoom: f32) -> egui::Rect {
     let stride = (PAGE_H_MM + PAGE_GAP_MM) * zoom;
     egui::Rect::from_min_size(
         egui::pos2(content_min.x, content_min.y + index as f32 * stride),

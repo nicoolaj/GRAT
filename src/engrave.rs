@@ -242,6 +242,52 @@ pub fn onsets(bar: &Bar) -> Vec<u32> {
         .collect()
 }
 
+/// One event's moment in playback: when it starts sounding, and when the next
+/// event does.
+///
+/// Deliberately geometry-free — the live player maps `(bar, event)` onto the
+/// screen itself, and does it differently in each of its two views.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cue {
+    pub bar: usize,
+    pub event: usize,
+    /// Seconds from the start of the piece.
+    pub start: f32,
+    /// Seconds: where the next event starts, or where the piece ends.
+    pub end: f32,
+}
+
+/// Every event of the document in playing order, timed at `doc.tempo`.
+///
+/// The tempo field is read as quarter notes per minute whatever the metre —
+/// the convention every tablature editor uses — so one tick lasts
+/// `60 / (tempo * 960)` seconds.
+///
+/// ponytail: repeats are not unrolled, so the piece plays through once, left to
+/// right; and a compound metre, which a player counts in dotted quarters, comes
+/// out half again too fast for a tempo written that way. Both are corrections to
+/// this one function — the cue list is what every caller reads — but unrolling
+/// also makes it revisit bars, which every position lookup would then have to
+/// disambiguate.
+pub fn timeline(doc: &Document) -> Vec<Cue> {
+    let per_tick = 60.0 / (doc.tempo.max(1) as f32 * NoteValue::Quarter.ticks() as f32);
+    let mut t = 0.0;
+    let mut out = Vec::new();
+    for (bar, b) in doc.bars.iter().enumerate() {
+        for (event, e) in b.events.iter().enumerate() {
+            let start = t;
+            t += e.dur.ticks() as f32 * per_tick;
+            out.push(Cue {
+                bar,
+                event,
+                start,
+                end: t,
+            });
+        }
+    }
+    out
+}
+
 /// Whether the bar's contents add up to its metre. A `false` here is shown as a
 /// warning in the editor, never as an error: half-written bars are normal while typing.
 pub fn is_complete(bar: &Bar, time_sig: (u8, u8)) -> bool {

@@ -3,7 +3,7 @@
 
 use strungin::engrave::{
     bar_ticks, beam_groups, beam_runs, is_complete, natural_bar_width, set_event_dur, set_time_sig,
-    shift_event_dur, split_ticks, system_spacing, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
+    shift_event_dur, split_ticks, system_spacing, timeline, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
 };
 use strungin::model::*;
 
@@ -403,4 +403,53 @@ fn shift_event_dur_overflow_grows_the_document() {
     for bar in &doc.bars {
         assert!(is_complete(bar, (4, 4)));
     }
+}
+
+#[test]
+fn timeline_turns_ticks_into_seconds_at_the_document_tempo() {
+    let mut doc = doc_with(Bar {
+        events: vec![
+            ev(NoteValue::Quarter, vec![note(5)]),
+            ev(NoteValue::Eighth, vec![]),
+            ev(NoteValue::Eighth, vec![note(7)]),
+            ev(NoteValue::Half, vec![note(0)]),
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    doc.tempo = 120; // a quarter note lasts half a second
+
+    let cues = timeline(&doc);
+    assert_eq!(cues.len(), 4);
+    // A rest is a cue like any other: the player counts it.
+    assert_eq!((cues[1].bar, cues[1].event), (0, 1));
+    for (cue, want) in cues.iter().zip([0.0, 0.5, 0.75, 1.0]) {
+        assert!(
+            (cue.start - want).abs() < 1e-4,
+            "cue {cue:?} should start at {want}"
+        );
+    }
+    // One 4/4 bar at 120 is two seconds, and each cue ends where the next starts.
+    assert!((cues[3].end - 2.0).abs() < 1e-4);
+    for pair in cues.windows(2) {
+        assert!((pair[0].end - pair[1].start).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn timeline_halves_when_the_tempo_doubles() {
+    let mut doc = doc_with(Bar {
+        events: vec![ev(NoteValue::Whole, vec![note(3)])],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    doc.tempo = 60;
+    let slow = timeline(&doc).last().unwrap().end;
+    doc.tempo = 120;
+    let fast = timeline(&doc).last().unwrap().end;
+    assert!(
+        (slow - 4.0).abs() < 1e-4,
+        "four beats at 60 bpm is four seconds"
+    );
+    assert!((fast - slow / 2.0).abs() < 1e-4);
 }

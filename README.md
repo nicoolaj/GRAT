@@ -30,6 +30,24 @@ défaut tablature en haut). Les trois lignes d'un même bloc partagent le même 
 horizontal, calculé une seule fois, ce qui les garde alignées verticalement par
 construction.
 
+## Mode live
+
+`Affichage > Mode live` (⌘L) fait passer la fenêtre en lecture : la partition défile
+toute seule au tempo du document, et le temps en train d'être joué est surligné au
+centre de l'écran.
+
+- **Pages déroulantes** — la partition telle qu'elle s'imprime, recadrée en continu sur
+  la note à jouer.
+- **Ligne unique** — toutes les mesures sur un seul ruban, qui glisse sous une tête de
+  lecture fixe.
+
+La taille (millimètres vers pixels) monte bien au-delà de celle de l'éditeur, et la
+vitesse se règle de ×0,25 à ×2 : c'est un réglage de répétition, il ne touche pas au
+tempo enregistré dans le document et n'est pas sauvegardé. Espace lance et met en pause,
+← / → sautent d'une mesure, Échap sort.
+
+Le mode live n'émet aucun son : il montre où on en est, il ne joue pas.
+
 ## Format de fichier
 
 Les documents sont enregistrés en JSON lisible et diffable, extension `.gtab`
