@@ -2,8 +2,9 @@
 //! impossible to eyeball once a page is full of notes.
 
 use strungin::engrave::{
-    bar_ticks, beam_groups, beam_runs, is_complete, natural_bar_width, set_event_dur, set_time_sig,
-    shift_event_dur, split_ticks, system_spacing, timeline, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
+    bar_duration_secs, bar_ticks, beam_groups, beam_runs, is_complete, metronome_beats,
+    natural_bar_width, set_event_dur, set_time_sig, shift_event_dur, split_ticks, system_spacing,
+    timeline, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
 };
 use strungin::model::*;
 
@@ -452,4 +453,79 @@ fn timeline_halves_when_the_tempo_doubles() {
         "four beats at 60 bpm is four seconds"
     );
     assert!((fast - slow / 2.0).abs() < 1e-4);
+}
+
+#[test]
+fn metronome_clicks_once_per_beat_and_accents_the_downbeat() {
+    // Two 4/4 bars of quarters -- the metronome doesn't care what the events
+    // are, only the time signature, so a single whole note per bar still gets
+    // four clicks.
+    let mut doc = Document::new_empty();
+    doc.tempo = 120;
+    doc.bars = vec![
+        Bar {
+            events: vec![ev(NoteValue::Whole, vec![note(0)])],
+            time_sig: Some((4, 4)),
+            ..Default::default()
+        },
+        Bar {
+            events: vec![ev(NoteValue::Whole, vec![note(0)])],
+            ..Default::default()
+        },
+    ];
+
+    let beats = metronome_beats(&doc);
+    assert_eq!(beats.len(), 8, "four quarter-note beats per 4/4 bar");
+    for (i, want_time) in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
+        .into_iter()
+        .enumerate()
+    {
+        assert!(
+            (beats[i].time - want_time).abs() < 1e-4,
+            "beat {i} ({beats:?}) should land at {want_time}"
+        );
+    }
+    assert_eq!(beats.iter().filter(|b| b.downbeat).count(), 2);
+    assert!(beats[0].downbeat && beats[4].downbeat, "{beats:?}");
+    assert!(!beats[1].downbeat && !beats[2].downbeat && !beats[3].downbeat);
+    assert_eq!(beats[0].bar, 0);
+    assert_eq!(beats[4].bar, 1);
+
+    // `index_in_bar` restarts at each bar and `beats_in_bar` is the same four
+    // for every beat of a 4/4 bar -- what the live-mode flash dot's colour ramp
+    // and printed beat number both read.
+    assert_eq!(
+        beats.iter().map(|b| b.index_in_bar).collect::<Vec<_>>(),
+        [0, 1, 2, 3, 0, 1, 2, 3]
+    );
+    assert!(beats.iter().all(|b| b.beats_in_bar == 4), "{beats:?}");
+}
+
+#[test]
+fn metronome_pulses_a_compound_metre_in_dotted_quarters_not_eighths() {
+    // 6/8 groups (and so clicks) in two, the same beat unit `beam_groups` beams
+    // by -- not six eighth-note clicks.
+    let mut doc = Document::new_empty();
+    doc.tempo = 120;
+    doc.bars = vec![Bar {
+        events: vec![ev(NoteValue::Whole, vec![note(0)])], // padded to a bar by refit elsewhere; metronome only reads the metre
+        time_sig: Some((6, 8)),
+        ..Default::default()
+    }];
+
+    let beats = metronome_beats(&doc);
+    assert_eq!(beats.len(), 2, "6/8 clicks in two, not six: {beats:?}");
+    assert!(beats[0].downbeat && !beats[1].downbeat);
+    // A dotted quarter at 120 bpm (quarter = 0.5s) is 0.75s.
+    assert!((beats[1].time - 0.75).abs() < 1e-4);
+    assert_eq!((beats[0].index_in_bar, beats[1].index_in_bar), (0, 1));
+    assert!(beats.iter().all(|b| b.beats_in_bar == 2));
+}
+
+#[test]
+fn bar_duration_matches_a_bars_worth_of_metronome_beats() {
+    assert!((bar_duration_secs((4, 4), 120) - 2.0).abs() < 1e-4);
+    assert!((bar_duration_secs((3, 4), 120) - 1.5).abs() < 1e-4);
+    // 6/8 at 120 is two dotted-quarter beats, same 0.75s each as above.
+    assert!((bar_duration_secs((6, 8), 120) - 1.5).abs() < 1e-4);
 }

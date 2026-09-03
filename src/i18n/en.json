@@ -92,6 +92,8 @@
   "live.play": "Play",
   "live.pause": "Pause",
   "live.restart": "Back to start",
+  "live.metronome": "Metronome",
+  "live.count_in": "Count-in",
   "live.speed": "Speed",
   "live.bpm": "bpm",
   "live.size": "Size",

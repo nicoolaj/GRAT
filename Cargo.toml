@@ -1,6 +1,6 @@
 [package]
 name = "strungin"
-version = "1.5.0"
+version = "1.6.0"
 edition = "2021"
 authors = ["Nicolas Jalibert <nicoolaj@gmail.com>"]
 description = "Six-string guitar tablature editor: place notes by mouse, print an A4 PDF"
@@ -28,7 +28,24 @@ sys-locale = "0.3"
 # Only the jpeg decoder: src/assets/cover.jpg is the one image this app ever reads.
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
+# The live-mode metronome click, macOS/Windows only -- see "Verified API facts" in
+# CLAUDE.md. On Linux this pulls in cpal's ALSA backend, whose `alsa-sys` build
+# script calls pkg-config for a target sysroot; the zig cross-linker `dist-cross`
+# uses has none, and failing that isn't a warning, it's a hard build-script abort.
+# live.rs compiles metronome audio out on Linux entirely (`cfg(target_os =
+# "linux")`) rather than carry that sysroot as a new host-setup step.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
+
+# `make build` / `cargo build --release` — fully optimised for execution speed.
 [profile.release]
 opt-level = 3
 lto = true
+codegen-units = 1   # single unit: best runtime speed, slower to link
 strip = true
+
+# `make debug` / `cargo build` — fastest possible build: no optimisation, and no
+# debuginfo (its generation is the biggest compile-time cost after opt-level).
+# Drop `debug = false` if you need line numbers in a backtrace.
+[profile.dev]
+debug = false

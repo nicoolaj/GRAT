@@ -1,10 +1,11 @@
-.PHONY: help run build app examples test fmt lint clean check-zigbuild \
+.PHONY: help run build debug app examples test fmt lint clean check-zigbuild \
 	dist-cross dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64
 
 help:
 	@echo "Strungin — available targets:"
 	@echo "  run         cargo run (opens the app window)"
-	@echo "  build       cargo build --release, copy the binary into dist/"
+	@echo "  build       cargo build --release (fully optimised), copy the binary into dist/"
+	@echo "  debug       cargo build (dev profile) — fastest compile, no optimisation"
 	@echo "  app         bundle dist/Strungin.app (Info.plist + icon + binary) — macOS only"
 	@echo "  examples    regenerate exemples/*.pdf via --export"
 	@echo "  dist-cross  cross-build Windows + Linux, amd64 + arm64, into dist/<platform>/"
@@ -15,6 +16,9 @@ help:
 
 run:
 	cargo run
+
+debug:
+	cargo build
 
 build:
 	cargo build --release

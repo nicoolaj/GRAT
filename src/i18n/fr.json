@@ -92,6 +92,8 @@
   "live.play": "Lecture",
   "live.pause": "Pause",
   "live.restart": "Retour au début",
+  "live.metronome": "Métronome",
+  "live.count_in": "Décompte",
   "live.speed": "Vitesse",
   "live.bpm": "bpm",
   "live.size": "Taille",

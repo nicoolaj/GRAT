@@ -242,6 +242,19 @@ pub fn onsets(bar: &Bar) -> Vec<u32> {
         .collect()
 }
 
+/// Seconds one tick lasts at `tempo` quarter notes per minute, whatever the
+/// metre -- the convention every tablature editor reads a tempo number by.
+/// Shared by [`timeline`] and [`metronome_beats`] so the note clock and the
+/// click clock can never drift apart.
+fn seconds_per_tick(tempo: u16) -> f32 {
+    60.0 / (tempo.max(1) as f32 * NoteValue::Quarter.ticks() as f32)
+}
+
+/// Seconds one bar of `time_sig` lasts at `tempo`.
+pub fn bar_duration_secs(time_sig: (u8, u8), tempo: u16) -> f32 {
+    bar_ticks(time_sig) as f32 * seconds_per_tick(tempo)
+}
+
 /// One event's moment in playback: when it starts sounding, and when the next
 /// event does.
 ///
@@ -259,10 +272,6 @@ pub struct Cue {
 
 /// Every event of the document in playing order, timed at `doc.tempo`.
 ///
-/// The tempo field is read as quarter notes per minute whatever the metre —
-/// the convention every tablature editor uses — so one tick lasts
-/// `60 / (tempo * 960)` seconds.
-///
 /// ponytail: repeats are not unrolled, so the piece plays through once, left to
 /// right; and a compound metre, which a player counts in dotted quarters, comes
 /// out half again too fast for a tempo written that way. Both are corrections to
@@ -270,7 +279,7 @@ pub struct Cue {
 /// also makes it revisit bars, which every position lookup would then have to
 /// disambiguate.
 pub fn timeline(doc: &Document) -> Vec<Cue> {
-    let per_tick = 60.0 / (doc.tempo.max(1) as f32 * NoteValue::Quarter.ticks() as f32);
+    let per_tick = seconds_per_tick(doc.tempo);
     let mut t = 0.0;
     let mut out = Vec::new();
     for (bar, b) in doc.bars.iter().enumerate() {
@@ -283,6 +292,56 @@ pub fn timeline(doc: &Document) -> Vec<Cue> {
                 start,
                 end: t,
             });
+        }
+    }
+    out
+}
+
+/// One metronome pulse. Independent of `Bar::events` -- a metronome ticks
+/// through a bar's rests exactly like it ticks through its notes, which is why
+/// this is not just read off [`Cue`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Beat {
+    pub bar: usize,
+    /// Seconds from the start of the piece (or, for a count-in's own grid, from
+    /// the start of the count-in).
+    pub time: f32,
+    /// First beat of its bar: the metronome's accented click.
+    pub downbeat: bool,
+    /// Position within the bar, 0-based -- 0 is the downbeat itself.
+    pub index_in_bar: u32,
+    /// How many beats this bar's metre has in total, so a caller can place
+    /// `index_in_bar` on a scale (a colour ramp, a printed beat number) without
+    /// re-deriving it from the time signature.
+    pub beats_in_bar: u32,
+}
+
+/// Metronome pulses for every bar of `doc`, at `doc.tempo`. One pulse per beat of
+/// each bar's own metre -- the same grouping [`beam_groups`] beams by, so a
+/// compound bar like 6/8 clicks in two, not six.
+pub fn metronome_beats(doc: &Document) -> Vec<Beat> {
+    let per_tick = seconds_per_tick(doc.tempo);
+    let mut t = 0.0;
+    let mut out = Vec::new();
+    for bar in 0..doc.bars.len() {
+        let sig = doc.time_sig_at(bar);
+        let beat = beat_ticks(sig).max(1);
+        let total = bar_ticks(sig);
+        let beats_in_bar = total.div_ceil(beat);
+        let mut consumed = 0;
+        let mut index_in_bar = 0;
+        while consumed < total {
+            out.push(Beat {
+                bar,
+                time: t,
+                downbeat: consumed == 0,
+                index_in_bar,
+                beats_in_bar,
+            });
+            let step = beat.min(total - consumed);
+            t += step as f32 * per_tick;
+            consumed += step;
+            index_in_bar += 1;
         }
     }
     out

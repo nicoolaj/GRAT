@@ -46,7 +46,17 @@ vitesse se règle de ×0,25 à ×2 : c'est un réglage de répétition, il ne to
 tempo enregistré dans le document et n'est pas sauvegardé. Espace lance et met en pause,
 ← / → sautent d'une mesure, Échap sort.
 
-Le mode live n'émet aucun son : il montre où on en est, il ne joue pas.
+Un métronome classique marque chaque temps d'un clic et, en même temps, d'un point qui
+s'allume en haut à droite de l'écran avec le numéro du temps inscrit dedans — rouge sur le
+premier temps de la mesure, puis un dégradé du rose au jaune selon la position du temps
+dans la mesure (le dernier temps avant le prochain premier temps est toujours jaune). Au
+moment de lancer la lecture, un nombre de mesures à vide (2 par défaut) peut être compté
+avant que la partition ne démarre réellement. Le métronome se coupe d'une case à cocher ;
+il ne joue jamais les notes de la tablature elle-même, seulement le battement.
+
+Le clic du métronome n'est disponible que sur macOS et Windows : sur Linux, le point
+continue de s'allumer au bon moment, mais sans le son (voir le commentaire de la
+dépendance `rodio` dans `Cargo.toml`).
 
 ## Format de fichier
 

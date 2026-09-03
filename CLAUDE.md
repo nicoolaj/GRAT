@@ -48,7 +48,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs, strum row, rhythm stems |
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, hit boxes |
 | `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette |
-| `live.rs` | the live player: transport, the two scrolling views, the highlighter. A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. Visual only — no sound |
+| `live.rs` | the live player: transport, the two scrolling views, the highlighter, the metronome (click + flash + count-in). A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. The metronome click is macOS/Windows only — see "Verified API facts" |
 | `pdf.rs` | `Prim` → printpdf ops |
 | `main.rs` | window, theme, menus, dialogs, shortcuts, `--export` CLI |
 
@@ -75,11 +75,14 @@ never know about pages, egui or PDF.
    the exception.
 7. **The library stays GUI-free.** `cargo test` and the `--export` CLI must work without opening a
    window, which is why `canvas.rs` is a module of the binary.
-8. **The live player's cues, strip and pages all come from one `engrave::for_export`
-   of the document.** That call trims the editor's trailing blank bars and rewrites its
-   per-beat rests, which renumbers events — so a cue's `(bar, event)` only addresses the
-   right column if the geometry was built from the very same normalised document.
-   `LiveState::enter` builds all three together for exactly that reason; don't split it up.
+8. **The live player's cues, metronome beats, strip and pages all come from one
+   `engrave::for_export` of the document.** That call trims the editor's trailing blank bars and
+   rewrites its per-beat rests, which renumbers events — so a cue's `(bar, event)` only addresses the
+   right column if the geometry was built from the very same normalised document, and the metronome
+   grid only counts the right number of bars if it walks that same document too.
+   `LiveState::enter` builds all four together for exactly that reason; don't split it up. A
+   count-in's own beat grid is the one exception: built fresh per play, from a throwaway document of
+   empty bars, not from `Show` — see `live::start_count_in`.
 9. **Fret labels contain `<`, `>`, `(`, `)`** (harmonics `<12>`, ghost notes `(5)`, trills `5(9)`).
    Any text backend must escape for its own format — this already bit the SVG proof sheet.
 
@@ -127,6 +130,20 @@ never know about pages, egui or PDF.
   crash, but the app's own actions (New, Open, Save, Undo, switching the block model...) all need
   custom items, which is most of the menu. Reverted to `egui::Panel::top` + `egui::MenuBar` on every
   platform, including macOS — see `TablaturesApp::egui_menu_bar` in `main.rs`.
+- **`rodio 0.22` (the live-mode metronome click) is macOS/Windows only — do not add it back as a
+  plain, all-platform dependency.** Its `playback` feature (needed for any actual output; it is not
+  in the default feature set either) pulls in `cpal`, whose Linux backend is `alsa-sys`. That crate's
+  build script calls `pkg-config` for the *target's* `libasound`, and aborts outright — not a
+  degraded fallback, a hard build failure — when none is configured, which is exactly the zig
+  cross-linker `make dist-cross` uses for `x86_64-`/`aarch64-unknown-linux-gnu` (confirmed by
+  actually running `cargo zigbuild --target x86_64-unknown-linux-gnu` with `rodio`'s `playback`
+  feature on: `alsa-sys`'s build script panics with "pkg-config has not been configured to support
+  cross-compilation"). macOS (CoreAudio via `coreaudio-rs`) and Windows (WASAPI via the `windows`
+  crate) both cross-build clean under zig — confirmed the same way — so only Linux is the problem.
+  Cargo.toml scopes the dependency to `[target.'cfg(not(target_os = "linux"))'.dependencies]` and
+  `live.rs` carries a `#[cfg(target_os = "linux")]` no-op stub of the same `click::Audio` API instead
+  of carrying an ALSA sysroot as a new host-setup step. Revisit only alongside a real Linux ALSA (or
+  PipeWire) dev sysroot wired into `check-zigbuild`, not by flipping the feature back on alone.
 
 ## Recipes
 
@@ -192,4 +209,6 @@ produces a PNG.
 ## Out of scope for v1 — ask before building
 
 Tuplets (triplets); ties across a barline; da capo / segno and alternate endings (1./2.); MusicXML
-or Guitar Pro import and export; audio or MIDI playback; multi-level undo beyond the snapshot stack.
+or Guitar Pro import and export; multi-level undo beyond the snapshot stack. MIDI playback, and
+audio playback of the piece's own notes, are still out of scope — the live-mode metronome (`live.rs`)
+is a synthesised click marking time, not a synthesiser for what the tablature says to play.

@@ -10,19 +10,30 @@
 //! moving.
 
 use eframe::egui;
-use strungin::engrave::Cue;
+use strungin::engrave::{Beat, Cue};
 use strungin::layout::{Page, Strip};
-use strungin::model::Document;
+use strungin::model::{self, Document};
 use strungin::tablature::Hit;
 use strungin::{engrave, i18n::t, layout, P, PAGE_H_MM, PAGE_W_MM};
 
 use crate::canvas::{draw_prim, page_rect, to_screen, PAGE_GAP_MM};
+use click::Audio;
 
 /// Highlighter yellow. Laid on the paper *under* the ink, which is what makes it
 /// read as a marker stroke rather than a coloured box on top of the notes.
 const MARKER: egui::Color32 = egui::Color32::from_rgba_premultiplied(0xFF, 0xD8, 0x2A, 0xC0);
 /// The fixed "now" line of the single-line view.
 const PLAYHEAD: egui::Color32 = egui::Color32::from_rgb(0x5E, 0x5C, 0xE6);
+/// The metronome flash's colour ramp: red on the downbeat, then every other beat
+/// of the bar shades from pink to yellow -- the last beat before the next
+/// downbeat always lands on pure yellow. Red and pink are Apple's systemRed and
+/// systemPink (this file's `MARKER` is already this same yellow, at lower alpha).
+const FLASH_DOWNBEAT: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x3B, 0x30);
+const FLASH_PINK: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x2D, 0x55);
+const FLASH_YELLOW: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xD8, 0x2A);
+/// Radius of the flash dot, screen pixels -- independent of `zoom`: it is a HUD
+/// element over the score, not part of it.
+const FLASH_RADIUS: f32 = 24.0;
 /// Air above and below a highlighted column, so the marker covers the note and
 /// its stem instead of stopping at the outer string lines.
 const MARKER_PAD_MM: f32 = 1.6;
@@ -32,9 +43,65 @@ const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 3.0..=24.0;
 /// Playing at a quarter speed is how a hard bar gets learnt; past double, the
 /// scrolling is faster than anyone reads.
 const SPEED_RANGE: std::ops::RangeInclusive<f32> = 0.25..=2.0;
+/// A count-in longer than this is more warm-up than count-in.
+const COUNT_IN_RANGE: std::ops::RangeInclusive<u32> = 0..=8;
 /// A frame that took longer than this (a window drag, a hidden window) advances
 /// the music by this much and no more, rather than skipping a bar.
 const MAX_FRAME_SECS: f32 = 0.1;
+/// How long the flash dot stays fully lit, then how much longer it takes to fade
+/// out -- both in real (wall-clock) seconds, so the dot reads the same at any
+/// rehearsal speed even though the beats it marks do not arrive at a steady rate.
+const FLASH_ON_SECS: f64 = 0.10;
+const FLASH_FADE_SECS: f64 = 0.20;
+
+/// The metronome click, macOS/Windows only -- see the dependency comment next to
+/// `rodio` in Cargo.toml and "Verified API facts" in CLAUDE.md.
+#[cfg(not(target_os = "linux"))]
+mod click {
+    use rodio::source::{SineWave, Source};
+    use rodio::{DeviceSinkBuilder, MixerDeviceSink};
+    use std::time::Duration;
+
+    /// The open OS audio sink every click is mixed into. Playback stops the
+    /// instant this is dropped, so [`super::LiveState`] keeps it for as long as
+    /// live mode is open rather than reopening a device per click.
+    pub struct Audio(MixerDeviceSink);
+
+    impl Audio {
+        /// `None` when no output device is available (a sandboxed CI runner, a
+        /// machine with audio disabled) -- the metronome then still flashes, it
+        /// just never clicks, rather than live mode refusing to open at all.
+        pub fn open() -> Option<Audio> {
+            DeviceSinkBuilder::open_default_sink().ok().map(Audio)
+        }
+
+        /// A short synthesised tick: higher-pitched and louder on the downbeat.
+        /// A sine burst rather than a sample -- there is nothing to ship or load.
+        pub fn click(&self, downbeat: bool) {
+            let freq = if downbeat { 1500.0 } else { 1000.0 };
+            let volume = if downbeat { 0.35 } else { 0.22 };
+            let tick = SineWave::new(freq)
+                .take_duration(Duration::from_millis(45))
+                .amplify(volume);
+            self.0.mixer().add(tick);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod click {
+    /// No audio backend on this target -- see the dependency comment next to
+    /// `rodio` in Cargo.toml. The metronome flash still fires; it is just silent.
+    pub struct Audio;
+
+    impl Audio {
+        pub fn open() -> Option<Audio> {
+            None
+        }
+
+        pub fn click(&self, _downbeat: bool) {}
+    }
+}
 
 /// The player's own state. None of it belongs to the document: a rehearsal speed
 /// is temporary by definition, and so is where the playhead happens to be.
@@ -49,7 +116,66 @@ pub struct LiveState {
     pub zoom: f32,
     /// The playhead, in seconds from the start of the piece.
     pub t: f32,
+    /// Click and flash on every beat while playing.
+    pub metronome_on: bool,
+    /// Silent bars of metronome, next armed the next time Play starts from a
+    /// stop -- a rehearsal setting like `speed`, not part of the document.
+    pub count_in_bars: u32,
+    /// An active pre-roll: set the moment Play starts one, cleared the moment it
+    /// finishes (or live mode is left). While it holds, the metronome ticks and
+    /// `t` does not move.
+    count_in: Option<CountIn>,
+    /// The most recent beat that fired, for the flash dot.
+    flash: Option<Flash>,
+    audio: Option<Audio>,
     show: Option<Show>,
+}
+
+/// One firing of the flash dot: resolved once, when the beat fires, from that
+/// beat's position in its bar -- `draw_flash` only ever fades and draws it.
+struct Flash {
+    /// Wall-clock seconds it fired at, for a fade that reads the same at any
+    /// rehearsal speed even though beats themselves do not arrive at a steady
+    /// real-time rate.
+    at: f64,
+    color: egui::Color32,
+    /// 1-based: the number painted inside the dot.
+    number: u32,
+}
+
+/// The dot's colour for one beat: red on the downbeat, otherwise a point on the
+/// pink-to-yellow ramp scaled by its position in the bar -- the last beat of the
+/// bar is always pure yellow, whatever the metre.
+fn beat_color(beat: &Beat) -> egui::Color32 {
+    if beat.downbeat {
+        return FLASH_DOWNBEAT;
+    }
+    // The ramp spans the bar's secondary beats only (the downbeat itself is
+    // never on it): index 1 is pure pink, the last beat is pure yellow. A bar
+    // with a single secondary beat (6/8's two-pulse grouping) has no "first" to
+    // distinguish from "last" -- yellow wins that tie, since it is the beat
+    // right before the next downbeat either way.
+    let steps = beat.beats_in_bar.saturating_sub(2);
+    let t = if steps == 0 {
+        1.0
+    } else {
+        (beat.index_in_bar - 1) as f32 / steps as f32
+    };
+    lerp_color(FLASH_PINK, FLASH_YELLOW, t)
+}
+
+fn lerp_color(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    egui::Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
+}
+
+/// A count-in's own beat grid, timed from zero and independent of `Show`: the
+/// number of bars is a per-play choice, not part of the frozen score.
+struct CountIn {
+    beats: Vec<Beat>,
+    t: f32,
+    duration: f32,
 }
 
 /// Everything the player draws, built once when live mode opens and dropped when
@@ -66,6 +192,8 @@ struct Show {
     /// replaced underneath the player.
     source: Document,
     cues: Vec<Cue>,
+    /// The metronome's own grid, independent of `cues`: a bar's rests click too.
+    beats: Vec<Beat>,
     strip: Strip,
     pages: Vec<Page>,
     /// Seconds of music.
@@ -83,6 +211,11 @@ impl Default for LiveState {
             speed: 1.0,
             zoom: 9.0,
             t: 0.0,
+            metronome_on: true,
+            count_in_bars: 2,
+            count_in: None,
+            flash: None,
+            audio: None,
             show: None,
         }
     }
@@ -97,14 +230,18 @@ impl LiveState {
         self.open = true;
         self.playing = false;
         self.t = 0.0;
+        self.count_in = None;
+        self.flash = None;
+        self.audio = Audio::open();
         self.show = Some(Show {
-            source,
+            beats: engrave::metronome_beats(&doc),
             duration: cues.last().map(|c| c.end).unwrap_or(0.0),
             tempo: doc.tempo,
             bars: doc.bars.len(),
             cues,
             strip: layout::strip(&doc),
             pages: layout::paginate(&doc),
+            source,
         });
     }
 
@@ -113,6 +250,9 @@ impl LiveState {
     pub fn exit(&mut self) {
         self.open = false;
         self.playing = false;
+        self.count_in = None;
+        self.flash = None;
+        self.audio = None;
         self.show = None;
     }
 }
@@ -121,6 +261,53 @@ impl LiveState {
 /// makes the binary search legitimate.
 fn cue_index(cues: &[Cue], t: f32) -> usize {
     cues.partition_point(|c| c.start <= t).saturating_sub(1)
+}
+
+/// The beats whose moment falls in `[prev, now)`. Recomputed from the current
+/// position every frame (two binary searches, not a running cursor) so a seek --
+/// a bar jump, the position slider, "back to start" -- can never desync it into
+/// replaying a beat already passed or firing a burst of beats it skipped over.
+fn beats_crossed(beats: &[Beat], prev: f32, now: f32) -> &[Beat] {
+    let start = beats.partition_point(|b| b.time < prev);
+    let end = beats.partition_point(|b| b.time < now);
+    &beats[start..end]
+}
+
+/// Build a fresh count-in: `bars` bars of `sig`, silent but for the metronome,
+/// starting on its own clock at zero. Reuses `Bar::new_empty` and
+/// `metronome_beats` on a throwaway document rather than re-deriving the same
+/// beat-grid arithmetic a third time.
+fn start_count_in(bars: u32, sig: (u8, u8), tempo: u16) -> CountIn {
+    let mut doc = Document::new_empty();
+    doc.tempo = tempo;
+    doc.bars = (0..bars)
+        .map(|_| model::Bar::new_empty(Some(sig)))
+        .collect();
+    CountIn {
+        beats: engrave::metronome_beats(&doc),
+        t: 0.0,
+        duration: engrave::bar_duration_secs(sig, tempo) * bars as f32,
+    }
+}
+
+/// Play/Pause: pausing never loses a count-in in progress (it simply stops
+/// advancing, like the piece itself does), but starting fresh from a stop arms
+/// one if `count_in_bars` calls for it, timed at the metre of the bar `t` is
+/// about to resume into.
+fn toggle_play(state: &mut LiveState, show: &Show) {
+    if state.playing {
+        state.playing = false;
+        return;
+    }
+    if state.count_in.is_none() && state.count_in_bars > 0 {
+        let bar = show
+            .cues
+            .get(cue_index(&show.cues, state.t))
+            .map_or(0, |c| c.bar);
+        let sig = show.source.time_sig_at(bar);
+        state.count_in = Some(start_count_in(state.count_in_bars, sig, show.tempo));
+    }
+    state.playing = true;
 }
 
 /// Move the playhead one bar back or forward, to that bar's first event.
@@ -174,6 +361,37 @@ fn marker(painter: &egui::Painter, frame: egui::Rect, zoom: f32, lo: P, hi: P) {
     painter.rect_filled(egui::Rect::from_two_pos(a, b), 2.0, MARKER);
 }
 
+/// The metronome dot, top-right of the screen: lit the instant a beat fires
+/// (`flash` is set in the very same step that plays its click), carrying that
+/// beat's number in the bar, then fading over wall-clock time so its rhythm
+/// stays readable whatever the rehearsal speed.
+fn draw_flash(painter: &egui::Painter, rect: egui::Rect, now: f64, flash: &Option<Flash>) {
+    let Some(flash) = flash else {
+        return;
+    };
+    let age = now - flash.at;
+    if !(0.0..=FLASH_ON_SECS + FLASH_FADE_SECS).contains(&age) {
+        return;
+    }
+    let alpha = if age < FLASH_ON_SECS {
+        1.0
+    } else {
+        1.0 - (age - FLASH_ON_SECS) / FLASH_FADE_SECS
+    } as f32;
+    let center = egui::pos2(
+        rect.right() - FLASH_RADIUS - 10.0,
+        rect.top() + FLASH_RADIUS + 10.0,
+    );
+    painter.circle_filled(center, FLASH_RADIUS, flash.color.gamma_multiply(alpha));
+    painter.text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        flash.number.to_string(),
+        egui::FontId::proportional(FLASH_RADIUS * 1.1),
+        egui::Color32::BLACK.gamma_multiply(alpha),
+    );
+}
+
 /// Draw the player. Everything it needs was frozen by [`LiveState::enter`].
 pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
     // The player works from a score frozen at the moment it opened. The menu bar
@@ -195,7 +413,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
 
     ui.input_mut(|i| {
         if i.consume_key(egui::Modifiers::NONE, egui::Key::Space) {
-            state.playing = !state.playing;
+            toggle_play(state, &show);
         }
         if i.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
             leave = true;
@@ -209,12 +427,49 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
     });
 
     if state.playing {
-        let dt = ui.input(|i| i.stable_dt).min(MAX_FRAME_SECS);
-        state.t += dt * state.speed;
-        if state.t >= show.duration {
-            state.t = show.duration;
-            state.playing = false;
+        let dt = ui.input(|i| i.stable_dt).min(MAX_FRAME_SECS) * state.speed;
+        let now = ui.input(|i| i.time);
+
+        // The count-in and the piece share one clock each, but never both at
+        // once: while a count-in holds, it alone advances and `t` sits still at
+        // the point playback will resume from.
+        let (fired, phase_done) = match &mut state.count_in {
+            Some(ci) => {
+                let prev = ci.t;
+                ci.t += dt;
+                let hits: Vec<Beat> = beats_crossed(&ci.beats, prev, ci.t).to_vec();
+                (hits, ci.t >= ci.duration)
+            }
+            None => {
+                let prev = state.t;
+                state.t += dt;
+                let hits: Vec<Beat> = beats_crossed(&show.beats, prev, state.t).to_vec();
+                (hits, state.t >= show.duration)
+            }
+        };
+
+        if phase_done {
+            if state.count_in.is_some() {
+                state.count_in = None;
+            } else {
+                state.t = show.duration;
+                state.playing = false;
+            }
         }
+
+        if state.metronome_on {
+            for beat in &fired {
+                if let Some(audio) = &state.audio {
+                    audio.click(beat.downbeat);
+                }
+                state.flash = Some(Flash {
+                    at: now,
+                    color: beat_color(beat),
+                    number: beat.index_in_bar + 1,
+                });
+            }
+        }
+
         // egui repaints on input alone; music is the one thing here that moves
         // without any.
         ui.ctx().request_repaint();
@@ -229,11 +484,16 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
                 t("live.play")
             };
             if ui.button(play).clicked() {
-                state.playing = !state.playing;
+                toggle_play(state, &show);
             }
             if ui.button(t("live.restart")).clicked() {
                 state.t = 0.0;
+                state.count_in = None;
             }
+            ui.separator();
+            ui.checkbox(&mut state.metronome_on, t("live.metronome"));
+            ui.label(t("live.count_in"));
+            ui.add(egui::DragValue::new(&mut state.count_in_bars).range(COUNT_IN_RANGE));
             ui.separator();
             ui.label(t("live.speed"));
             ui.add(
@@ -278,11 +538,34 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
 
     egui::Panel::bottom("live_position").show(ui, |ui| {
         ui.horizontal(|ui| {
-            let bar = show
-                .cues
-                .get(cue_index(&show.cues, state.t))
-                .map_or(0, |c| c.bar + 1);
-            ui.label(format!("{} {} / {}", t("status.bar"), bar, show.bars));
+            match &state.count_in {
+                // The count-in's own bar count, not the piece's -- `t` has not
+                // moved yet, so the piece's own bar readout would be stale.
+                Some(ci) => {
+                    let bar = ci
+                        .beats
+                        .iter()
+                        .rev()
+                        .find(|b| b.time <= ci.t)
+                        .map_or(0, |b| b.bar);
+                    ui.colored_label(
+                        FLASH_DOWNBEAT,
+                        format!(
+                            "{} {} / {}",
+                            t("live.count_in"),
+                            bar + 1,
+                            state.count_in_bars
+                        ),
+                    );
+                }
+                None => {
+                    let bar = show
+                        .cues
+                        .get(cue_index(&show.cues, state.t))
+                        .map_or(0, |c| c.bar + 1);
+                    ui.label(format!("{} {} / {}", t("status.bar"), bar, show.bars));
+                }
+            }
             ui.separator();
             ui.label(format!("{} / {}", clock(state.t), clock(show.duration)));
             ui.separator();
@@ -311,6 +594,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
             } else {
                 draw_pages(ui.ctx(), &painter, rect, state, &show, i);
             }
+            draw_flash(&painter, rect, ui.input(|i| i.time), &state.flash);
         });
 
     state.show = Some(show);
@@ -449,5 +733,50 @@ fn draw_pages(
         for prim in &p.prims {
             draw_prim(ctx, painter, prect, zoom, prim);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn beat(downbeat: bool, index_in_bar: u32, beats_in_bar: u32) -> Beat {
+        Beat {
+            bar: 0,
+            time: 0.0,
+            downbeat,
+            index_in_bar,
+            beats_in_bar,
+        }
+    }
+
+    #[test]
+    fn the_downbeat_is_always_red_whatever_its_place_in_the_grid() {
+        assert_eq!(beat_color(&beat(true, 0, 4)), FLASH_DOWNBEAT);
+    }
+
+    #[test]
+    fn the_last_beat_of_any_bar_is_always_pure_yellow() {
+        for beats_in_bar in [2, 3, 4, 6] {
+            let last = beat(false, beats_in_bar - 1, beats_in_bar);
+            assert_eq!(
+                beat_color(&last),
+                FLASH_YELLOW,
+                "beats_in_bar {beats_in_bar}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ramp_runs_pink_to_yellow_in_order_across_a_bar() {
+        // 4/4: beat 1 is the (red) downbeat; 2, 3, 4 should shade strictly
+        // pink-to-yellow, each redder (lower blue-to-red ratio isn't the point --
+        // just monotonically closer to yellow) than the last.
+        let colors: Vec<_> = (1..4).map(|i| beat_color(&beat(false, i, 4))).collect();
+        assert_eq!(colors[0], FLASH_PINK, "first non-downbeat starts at pink");
+        assert_eq!(colors[2], FLASH_YELLOW, "last beat lands on yellow");
+        // Green rises monotonically pink -> yellow; a strict, simple proxy for
+        // "the ramp moves the right way and doesn't double back".
+        assert!(colors[0].g() < colors[1].g() && colors[1].g() < colors[2].g());
     }
 }
