@@ -1,5 +1,5 @@
 {
-  "app.title": "Strungin",
+  "app.title": "GRAT",
   "menu.file": "File",
   "menu.new": "New",
   "menu.open": "Open…",
@@ -102,7 +102,7 @@
   "live.exit": "Leave",
   "status.insert_mode": "INS",
   "error.load": "Could not load the document.",
-  "error.load_too_new": "This file was made with a newer version of Strungin.",
+  "error.load_too_new": "This file was made with a newer version of GRAT.",
   "error.save": "Could not save the document.",
   "error.export": "Could not export the PDF.",
   "help.legend_title": "Playing techniques",

@@ -94,6 +94,36 @@ const TECH_SHOWN_STORAGE_KEY: &str = "tech_shown";
 /// The licence the About box names, so the line can be clicked through to it.
 const LICENSE_URL: &str = "https://creativecommons.org/licenses/by-nc-sa/4.0/";
 
+/// GRAT is a recursive acronym that deliberately never settles: the window title
+/// shows a different expansion each launch, the About box keeps the canonical one
+/// (`[0]`). It all winks at *gratte*, French slang for a guitar. French on purpose,
+/// so there is no English column for `i18n/*.json`.
+/// ponytail: inline const, not i18n -- untranslatable wordplay; revisit only if a
+/// second language ever wants its own set.
+const EXPANSIONS: &[&str] = &[
+    "GRAT Rédige les Accords et Tablatures",
+    "GRAT Range Arpèges et Tonalités",
+    "GRAT Relie les Accords et Tirés",
+    "GRAT Restitue Articulations et Techniques",
+    "GRAT Retranscrit Accords et Tempos",
+    "GRAT Révèle les Altérations et Transpositions",
+    "GRAT Répète les Arpèges à Tempo",
+    "GRAT Recompose Accords et Tablatures",
+    "GRAT Résout Accordages et Tonalités",
+    "GRAT Réaligne Attaques et Tenues",
+    "GRAT Reste Agréablement Trivial",
+    "GRAT n'a Rien d'Autre qu'une Tablature",
+];
+
+/// One expansion, picked by wall-clock nanoseconds -- no rng crate for a cosmetic
+/// title-bar pick.
+fn random_expansion() -> &'static str {
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos() as usize);
+    EXPANSIONS[n % EXPANSIONS.len()]
+}
+
 /// Decode and downscale the cover artwork exactly once. Shared by the window icon
 /// (built here, before the app exists) and the About/Help texture (built once in
 /// `TablaturesApp::new` from the same bytes, and kept for the app's lifetime rather
@@ -168,7 +198,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        &t("app.title"),
+        random_expansion(),
         native_options,
         Box::new(move |cc| {
             Ok(Box::new(TablaturesApp::new(
@@ -813,6 +843,7 @@ impl eframe::App for TablaturesApp {
                 ui.vertical_centered(|ui| {
                     ui.image((self.cover.id(), egui::vec2(120.0, 120.0)));
                     ui.heading(t("app.title"));
+                    ui.label(EXPANSIONS[0]);
                     ui.label(format!(
                         "{} {}",
                         t("about.version"),
