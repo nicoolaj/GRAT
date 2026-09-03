@@ -50,7 +50,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette |
 | `live.rs` | the live player: transport, the two scrolling views, the highlighter, the metronome (click + flash + count-in). A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. The metronome click is macOS/Windows only — see "Verified API facts" |
 | `pdf.rs` | `Prim` → printpdf ops |
-| `main.rs` | window, theme, menus, dialogs, shortcuts, `--export` CLI |
+| `main.rs` | window, theme, menus, dialogs, shortcuts, launch splash, `--export` CLI |
 
 Dependency direction is strictly downward in that table. `engrave`/`staff`/`notation`/`tablature`
 never know about pages, egui or PDF.
@@ -71,6 +71,8 @@ never know about pages, egui or PDF.
    number with a paper-coloured quad, so a row's primitives must be emitted contiguously.
 5. **No user-facing English literal outside `src/i18n/*.json`.** Not in `main.rs`, not in
    `canvas.rs`, not in a file-dialog filter. If you need a string, add a key to both language files.
+   (Lone exception: `EXPANSIONS` in `main.rs`, the recursive-acronym readings of the name — French
+   wordplay with no English form to key. Its `ponytail:` comment says so.)
 6. **Code and comments in English**; only the interface is translated. The README and this file are
    the exception.
 7. **The library stays GUI-free.** `cargo test` and the `--export` CLI must work without opening a
@@ -109,15 +111,20 @@ never know about pages, egui or PDF.
   both control points with `bezier: true`, the end point with `bezier: false`, `is_closed: false`.
   Verified in printpdf's `serialize.rs` — two consecutive bezier handles followed by an end point
   emit the `c` operator.
-- The cover artwork (`src/assets/cover.jpg`, 1024×1024, progressive JPEG) decodes with
-  `image = { version = "0.25", default-features = false, features = ["jpeg"] }` —
-  `load_from_memory_with_format(.., ImageFormat::Jpeg)?.to_rgba8()`, tested. Feed that to
-  `egui::ColorImage::from_rgba_unmultiplied` for the About and help pages, and to the viewport icon.
-  Downscale to ~256 px first with `image::imageops`: the full frame is 4 MB of RGBA for something
-  drawn at a fraction of that.
-- The macOS `.app` icon is `image.icns` at the repo root (hand-made, 1024×1024). `make app` just
-  copies it to `Contents/Resources/GRAT.icns` — `CFBundleIconFile` in the Info.plist is
-  `GRAT`, so the resource name must stay `GRAT.icns`.
+- The brand mark is `logo.svg` at the repo root: the name engraved on a one-bar six-string
+  tablature. Everything raster is derived from it by `make logo-assets` (macOS-only — it
+  rasterises the SVG with QuickLook, `qlmanage -t`, then `sips` + `iconutil`): `src/assets/logo.png`
+  (512 px, the app's only bundled image, `include_bytes!`d and decoded with
+  `image = { .., features = ["png"] }` → `load_from_memory_with_format(.., ImageFormat::Png)?.to_rgba8()`
+  → `egui::ColorImage::from_rgba_unmultiplied`, feeding the viewport icon, the splash, and the
+  About/Help pages) and `image.icns` at the repo root (the `.app` icon *and*, via
+  `CFBundleTypeIconFile`, the `.gtab` document icon). `make app` copies `image.icns` to
+  `Contents/Resources/GRAT.icns` — `CFBundleIconFile` is `GRAT`, so the resource name must stay
+  `GRAT.icns`. Edit `logo.svg`, rerun `make logo-assets`, commit both outputs.
+- The launch splash lives in `TablaturesApp::splash` (`main.rs`): an opaque foreground layer with
+  the logo and one random `EXPANSIONS` reading, up for 2.2 s or until the first click/key, then
+  gone for the session (`splash_until: Option<Instant>`). Its reading is an independent draw from
+  the window title's `random_expansion()` — both re-roll every launch.
 - **`muda` (native macOS menu bar) was tried and reverted — do not retry without checking upstream
   first.** muda 0.19.3's custom `NSMenuItem` subclass (`MudaMenuItem`) stores a raw pointer
   (`#[ivars = Cell<*const MenuChild>]`) to its Rust-side data instead of an owned/reference-counted

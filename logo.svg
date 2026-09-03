@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="GRAT">
+  <!-- GRAT logo: the name engraved on a one-bar, six-string tablature.
+       splash     - use as is, or pair the tile with a larger "GRAT" set beside it.
+       app icon   - rasterise to PNG, then .icns / .ico (make logo-assets).
+       small icon - hide #wordmark; the framed six-string bar still reads. Below
+                    ~32 px, swap in a single "G".
+       Before .icns/.ico, outline the text (Inkscape "Object to Path", resvg,
+       fontforge) so the mark needs no installed font. -->
+  <defs>
+    <linearGradient id="tile" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="512">
+      <stop offset="0" stop-color="#232331"/>
+      <stop offset="1" stop-color="#111016"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="120" fill="url(#tile)"/>
+
+  <g stroke="#8f8a7a" stroke-linecap="round">
+    <line x1="96" y1="176" x2="416" y2="176" stroke-width="1.6"/>
+    <line x1="96" y1="208" x2="416" y2="208" stroke-width="2.1"/>
+    <line x1="96" y1="240" x2="416" y2="240" stroke-width="2.7"/>
+    <line x1="96" y1="272" x2="416" y2="272" stroke-width="3.4"/>
+    <line x1="96" y1="304" x2="416" y2="304" stroke-width="4.1"/>
+    <line x1="96" y1="336" x2="416" y2="336" stroke-width="4.9"/>
+    <line x1="96" y1="164" x2="96" y2="348" stroke-width="6.5"/>
+    <line x1="416" y1="164" x2="416" y2="348" stroke-width="6.5"/>
+  </g>
+
+  <g id="wordmark">
+    <rect x="122" y="212" width="268" height="88" rx="12" fill="url(#tile)"/>
+    <text x="258" y="287" fill="#f2a049" text-anchor="middle" letter-spacing="1"
+          font-family="'Helvetica Neue', 'Inter', Arial, 'DejaVu Sans', sans-serif"
+          font-weight="800" font-size="90">GRAT</text>
+  </g>
+</svg>

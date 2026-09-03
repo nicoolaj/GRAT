@@ -5,6 +5,11 @@ souris et export PDF A4 prêt à imprimer. Binaire unique, portable (macOS en pr
 Windows/Linux visés), thème clair/sombre suivant l'OS, interface FR/EN détectée
 automatiquement.
 
+Le nom est un acronyme récursif qui ne se fixe jamais : la barre de titre et l'écran
+d'accueil tirent au hasard, à chaque lancement, une lecture de « GRAT » (`GRAT Rédige les
+Accords et Tablatures`, `GRAT Range Arpèges et Tonalités`, …) — le tout clin d'œil à
+*gratte*. L'« À propos » garde la lecture canonique.
+
 ## Compilation et lancement
 
 ```sh
@@ -75,6 +80,7 @@ le modèle de données ; les fichiers v1 existants continuent de se charger tels
 | `run` | `cargo run` |
 | `build` | `cargo build --release` puis copie du binaire dans `dist/` |
 | `app` | empaquette `dist/GRAT.app` (Info.plist + icône .icns + binaire) — macOS |
+| `logo-assets` | régénère `image.icns` et `src/assets/logo.png` depuis `logo.svg` — macOS |
 | `examples` | régénère `exemples/*.pdf` via `--export` |
 | `test` | `cargo test` |
 | `fmt` | `cargo fmt` |
