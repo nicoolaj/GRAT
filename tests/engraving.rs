@@ -222,34 +222,70 @@ fn justification_fills_the_line_without_reordering_events() {
 }
 
 #[test]
-fn a_bar_is_centred_between_its_own_barlines() {
-    // Whatever the bar holds and however the line is justified, the air before the
-    // first event must equal the air after the last one -- otherwise the music
-    // hugs one barline, which is exactly what an eye catches on a printed page.
-    let mixed = vec![
+fn the_last_event_of_a_bar_still_gets_its_duration_in_paper() {
+    // The eye reads duration as horizontal distance. A bar ending on a quarter
+    // rest must show a quarter's worth of paper before the barline: leaving the
+    // last event out of the width squeezed the final beat of every bar to a
+    // fraction of its rightful size.
+    let events = vec![
         ev(NoteValue::Quarter, vec![note(5)]),
-        ev(NoteValue::Quarter, vec![note(8)]),
         ev(NoteValue::Quarter, vec![note(8)]),
         ev(NoteValue::Eighth, vec![note(6)]),
         ev(NoteValue::Eighth, vec![note(5)]),
+        ev(NoteValue::Quarter, vec![]), // trailing rest, one whole beat
     ];
-    for events in [mixed, vec![ev(NoteValue::Whole, vec![note(5)])]] {
-        let n = events.len();
-        let doc = doc_with(Bar {
-            events,
-            time_sig: Some((4, 4)),
-            ..Default::default()
-        });
-        for target in [None, Some(200.0)] {
-            let sp = system_spacing(&doc, 0..1, target);
-            let bar = &sp.bars[0];
-            let lead = bar.events[0] - bar.x;
-            let trail = bar.x + bar.width - bar.events[n - 1];
-            assert!(
-                (lead - trail).abs() < 0.01,
-                "{n} events, target {target:?}: lead {lead} vs trail {trail}"
-            );
-        }
+    let n = events.len();
+    let doc = doc_with(Bar {
+        events,
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    for target in [None, Some(200.0)] {
+        let sp = system_spacing(&doc, 0..1, target);
+        let bar = &sp.bars[0];
+        let scale = bar.width / natural_bar_width(&doc.bars[0], 1.0);
+        let lead = bar.events[0] - bar.x;
+        let trail = bar.x + bar.width - bar.events[n - 1];
+        // Air is the same at both ends...
+        assert!(
+            (lead - BAR_GAP_MM / 2.0 * scale).abs() < 0.01,
+            "target {target:?}: lead {lead}"
+        );
+        // ...but the trailing quarter also owns its own slot on top of that air.
+        let want = (BAR_GAP_MM / 2.0
+            + grat::engrave::natural_event_width(
+                &Dur {
+                    base: NoteValue::Quarter,
+                    dots: 0,
+                },
+                1.0,
+            ))
+            * scale;
+        assert!(
+            (trail - want).abs() < 0.01,
+            "target {target:?}: trail {trail}, want {want}"
+        );
+    }
+}
+
+#[test]
+fn a_whole_bar_rest_is_centred_between_its_barlines() {
+    // The one symbol notation places at the middle of the bar rather than at the
+    // instant it falls on. `for_export` collapses every silent bar to this shape.
+    let doc = doc_with(Bar {
+        events: vec![ev(NoteValue::Whole, vec![])],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    for target in [None, Some(200.0)] {
+        let sp = system_spacing(&doc, 0..1, target);
+        let bar = &sp.bars[0];
+        let middle = bar.x + bar.width / 2.0;
+        assert!(
+            (bar.events[0] - middle).abs() < 0.01,
+            "target {target:?}: rest at {}, middle {middle}",
+            bar.events[0]
+        );
     }
 }
 
@@ -285,9 +321,17 @@ fn an_approach_slide_claims_room_in_front_of_itself() {
 
     let bar = &slid_sp.bars[0];
     let trail = bar.x + bar.width - bar.events[1];
+    let want = BAR_GAP_MM / 2.0
+        + grat::engrave::natural_event_width(
+            &Dur {
+                base: NoteValue::Quarter,
+                dots: 0,
+            },
+            1.0,
+        );
     assert!(
-        (trail - BAR_GAP_MM / 2.0).abs() < 0.001,
-        "trailing air must stay BAR_GAP_MM / 2 even though an earlier event grew: got {trail}"
+        (trail - want).abs() < 0.001,
+        "the last quarter's slot plus BAR_GAP_MM / 2 of air, unchanged by the lead-in: got {trail}, want {want}"
     );
 }
 

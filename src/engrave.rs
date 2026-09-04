@@ -9,16 +9,13 @@
 
 use crate::model::{Bar, Document, Dur, Event, NoteValue, Technique};
 
-/// Air around a barline: half before the bar's first event, half after its last.
+/// Air around a barline: half before the bar's first event, half after the end of
+/// its last one's duration slot.
 ///
 /// One constant split in two, rather than a lead-in and a trail that can drift
-/// apart — that equality is exactly what makes a bar's music sit centred between
-/// its own barlines instead of hugging the left one. The value is what the old
-/// asymmetric pair added up to, so line breaking packs the same bars per line.
-///
-/// ponytail: fixed, so a bar ending on a whole note gets no more air before the
-/// barline than one ending on a sixteenth. Scale the trailing half by the last
-/// event's duration if that ever reads as cramped — at the cost of the symmetry.
+/// apart. It is air only — the last event's own duration is reserved on top of it
+/// (see [`natural_bar_width`]), so this is the barline breathing room, not the
+/// space that shows how long the final note lasts.
 pub const BAR_GAP_MM: f32 = 8.75;
 /// A system is never squeezed below this fraction of its natural width; past that
 /// point the music overflows rather than becoming unreadable.
@@ -75,23 +72,27 @@ pub fn event_lead_in(event: &Event, h: f32) -> f32 {
 /// millimetre scales with `h` — [`BAR_GAP_MM`] too — so
 /// `natural_bar_width(.., h) == h * natural_bar_width(.., 1.0)` at any density.
 ///
-/// Only the events that have a successor *inside the bar* claim a duration slot:
-/// a slot is the room to the next note, and the last note has none. Its width is
-/// [`BAR_GAP_MM`] / 2 of air, the same as the first note's, which is what puts the
-/// music in the middle of the bar. A lead-in is different: it reserves room in
-/// front of its own note regardless of what follows, so every event counts here,
-/// the last one included.
+/// **Every** event claims a duration slot, the last one included. A slot is how
+/// long the event lasts, and the eye reads duration as horizontal distance: a bar
+/// ending on a quarter rest must show a quarter's worth of paper before the
+/// barline, or that whole beat reads as an instant. Leaving the last event out --
+/// which is what put the music optically in the middle of the bar -- made the
+/// final beat of every bar roughly a third of its rightful width.
 pub fn natural_bar_width(bar: &Bar, h: f32) -> f32 {
-    let events: f32 = match bar.events.split_last() {
+    let events: f32 = if bar.events.is_empty() {
         // An empty bar still needs to be visible and clickable.
-        None => natural_event_width(
+        natural_event_width(
             &Dur {
                 base: NoteValue::Whole,
                 dots: 0,
             },
             h,
-        ),
-        Some((_last, head)) => head.iter().map(|e| natural_event_width(&e.dur, h)).sum(),
+        )
+    } else {
+        bar.events
+            .iter()
+            .map(|e| natural_event_width(&e.dur, h))
+            .sum()
     };
     let lead_in: f32 = bar.events.iter().map(|e| event_lead_in(e, h)).sum();
     BAR_GAP_MM * h + events + lead_in
@@ -176,6 +177,13 @@ pub fn system_spacing(
             cursor += event_lead_in(event, h) * scale;
             events.push(cursor);
             cursor += natural_event_width(&event.dur, h) * scale;
+        }
+        // A whole-bar rest is centred between its barlines: the one place notation
+        // puts a symbol at the middle of the bar rather than at the instant it
+        // falls on. `for_export` collapses every silent bar to exactly this shape,
+        // and without the special case each one would hug its opening barline.
+        if bar.events.len() == 1 && bar.events[0].is_rest() {
+            events[0] = x + width * 0.5;
         }
         out.push(BarSpacing {
             index,
