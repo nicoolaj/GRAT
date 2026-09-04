@@ -53,18 +53,28 @@ const MAX_FRAME_SECS: f32 = 0.1;
 /// rehearsal speed even though the beats it marks do not arrive at a steady rate.
 const FLASH_ON_SECS: f64 = 0.10;
 const FLASH_FADE_SECS: f64 = 0.20;
+/// Base amplitude for one plucked string -- low enough that a six-string chord
+/// (`Mixer::add` just sums whatever is playing, there is no gain-staging) still
+/// sits under clipping. Not specified by ear yet; tune this first if the piece
+/// sounds too loud or too quiet next to the click's own 0.35/0.22.
+const NOTE_GAIN: f32 = 0.15;
+/// Longest a synthesised note is allowed to ring. Caps a whole note at a slow
+/// tempo so the fire-and-forget mixer never holds one open past the point it
+/// reads as a held pad rather than a plucked string.
+const MAX_TONE_SECS: f32 = 3.0;
 
-/// The metronome click, macOS/Windows only -- see the dependency comment next to
-/// `rodio` in Cargo.toml and "Verified API facts" in CLAUDE.md.
+/// The metronome click and the piece's own sound, macOS/Windows only -- see the
+/// dependency comment next to `rodio` in Cargo.toml and "Verified API facts" in
+/// CLAUDE.md.
 #[cfg(not(target_os = "linux"))]
 mod click {
-    use rodio::source::{SineWave, Source};
+    use rodio::source::{SineWave, Source, TriangleWave};
     use rodio::{DeviceSinkBuilder, MixerDeviceSink};
     use std::time::Duration;
 
-    /// The open OS audio sink every click is mixed into. Playback stops the
-    /// instant this is dropped, so [`super::LiveState`] keeps it for as long as
-    /// live mode is open rather than reopening a device per click.
+    /// The open OS audio sink every click and note is mixed into. Playback stops
+    /// the instant this is dropped, so [`super::LiveState`] keeps it for as long
+    /// as live mode is open rather than reopening a device per sound.
     pub struct Audio(MixerDeviceSink);
 
     impl Audio {
@@ -75,15 +85,28 @@ mod click {
             DeviceSinkBuilder::open_default_sink().ok().map(Audio)
         }
 
-        /// A short synthesised tick: higher-pitched and louder on the downbeat.
-        /// A sine burst rather than a sample -- there is nothing to ship or load.
-        pub fn click(&self, downbeat: bool) {
+        /// A short synthesised tick: higher-pitched and louder on the downbeat,
+        /// both scaled by `gain` -- the fader's metronome side.
+        pub fn click(&self, downbeat: bool, gain: f32) {
             let freq = if downbeat { 1500.0 } else { 1000.0 };
-            let volume = if downbeat { 0.35 } else { 0.22 };
+            let volume = (if downbeat { 0.35 } else { 0.22 }) * gain;
             let tick = SineWave::new(freq)
                 .take_duration(Duration::from_millis(45))
                 .amplify(volume);
             self.0.mixer().add(tick);
+        }
+
+        /// A plucked note: a triangle wave decaying linearly to silence over its
+        /// whole length, so it stops without a click and never needs stopping by
+        /// hand.
+        pub fn note(&self, freq: f32, secs: f32, gain: f32) {
+            let d = Duration::from_secs_f32(secs);
+            self.0.mixer().add(
+                TriangleWave::new(freq)
+                    .take_duration(d)
+                    .amplify(gain)
+                    .fade_out(d),
+            );
         }
     }
 }
@@ -99,7 +122,9 @@ mod click {
             None
         }
 
-        pub fn click(&self, _downbeat: bool) {}
+        pub fn click(&self, _downbeat: bool, _gain: f32) {}
+
+        pub fn note(&self, _freq: f32, _secs: f32, _gain: f32) {}
     }
 }
 
@@ -116,8 +141,10 @@ pub struct LiveState {
     pub zoom: f32,
     /// The playhead, in seconds from the start of the piece.
     pub t: f32,
-    /// Click and flash on every beat while playing.
-    pub metronome_on: bool,
+    /// Crossfade between the metronome click and the piece's own sound: 0.0 is
+    /// metronome only (today's behaviour, and the default), 1.0 is the piece
+    /// alone. Equal-power, not linear -- see `fader`.
+    pub mix: f32,
     /// Silent bars of metronome, next armed the next time Play starts from a
     /// stop -- a rehearsal setting like `speed`, not part of the document.
     pub count_in_bars: u32,
@@ -178,15 +205,15 @@ struct CountIn {
     duration: f32,
 }
 
-/// Everything the player draws, built once when live mode opens and dropped when
-/// it closes.
+/// Everything the player draws and sounds, built once when live mode opens and
+/// dropped when it closes.
 ///
 /// From `engrave::for_export(doc)`, not from the document the editor holds: that
 /// is what drops the blank bars the editor keeps ready under the music — silence
 /// the player would otherwise sit through — and writes its per-beat rests the way
-/// a score writes them. It renumbers events, so the cues, the strip and the pages
-/// must all come from that one normalised document; building them together here
-/// is what guarantees they agree.
+/// a score writes them. It renumbers events, so the cues, the tones, the strip and
+/// the pages must all come from that one normalised document; building them
+/// together here is what guarantees they agree.
 struct Show {
     /// The document as the editor holds it, kept only to notice that it has been
     /// replaced underneath the player.
@@ -194,12 +221,119 @@ struct Show {
     cues: Vec<Cue>,
     /// The metronome's own grid, independent of `cues`: a bar's rests click too.
     beats: Vec<Beat>,
+    /// Every note the piece itself sounds, mixed against `beats` by the fader.
+    tones: Vec<Tone>,
     strip: Strip,
     pages: Vec<Page>,
     /// Seconds of music.
     duration: f32,
     tempo: u16,
     bars: usize,
+}
+
+/// One note to sound: when, at what pitch, for how long, how loud. `time` and
+/// `secs` are score seconds, like a `Cue` -- the rehearsal speed divides `secs`
+/// at the moment it fires, in the transport code, not here.
+struct Tone {
+    time: f32,
+    freq: f32,
+    secs: f32,
+    gain: f32,
+}
+
+/// Natural-harmonic node, in semitones **added to the stopped fret's own
+/// pitch** (i.e. to what `Document::pitch` already returns for that fret) --
+/// not the absolute interval above the open string. Frets 4, 5, 7 and 9 each
+/// ring an overtone higher than where the finger lands (partials 5, 4, 3 and 5
+/// again); fret 12 already coincides with its own stopped pitch (partial 2, one
+/// octave), hence `_ => 0.0`, which also covers every fret nobody actually
+/// harmonics on.
+fn harmonic_offset(fret: u8) -> f32 {
+    match fret {
+        4 => 24.0,
+        5 => 19.0,
+        7 => 12.0,
+        9 => 19.0,
+        _ => 0.0,
+    }
+}
+
+/// Every note `doc` (already normalised by `engrave::for_export`) actually
+/// sounds, one per struck string, built alongside `cues` from that same
+/// document -- invariant 8.
+///
+/// ponytail: a bend sounds at its target pitch from the outset instead of
+/// gliding there, a trill sounds only its main note (never `to_fret`), and a
+/// tone is capped at `MAX_TONE_SECS`. All three want a per-tone pitch/length
+/// envelope this fire-and-forget mixer has nowhere to put -- upgrade path is a
+/// small envelope type `click::Audio::note` reads over time instead of one
+/// flat gain.
+fn tones(doc: &Document, cues: &[Cue]) -> Vec<Tone> {
+    let mut out = Vec::new();
+    for (i, cue) in cues.iter().enumerate() {
+        let event = &doc.bars[cue.bar].events[cue.event];
+        for note in &event.notes {
+            // A continuation of a tie split at a beat boundary: already
+            // sounded as part of the chain its first piece started below.
+            if i > 0 && cues[i - 1].bar == cue.bar {
+                let prev_event = &doc.bars[cue.bar].events[cues[i - 1].event];
+                if prev_event
+                    .notes
+                    .iter()
+                    .any(|n| n.string == note.string && n.tie_next)
+                {
+                    continue;
+                }
+            }
+
+            // This note's own length, extended through however many tied
+            // pieces follow it on the same string -- notation.rs:689 draws
+            // the same chain the same way.
+            let mut last = i;
+            loop {
+                let here = &doc.bars[cues[last].bar].events[cues[last].event];
+                if !here
+                    .notes
+                    .iter()
+                    .any(|n| n.string == note.string && n.tie_next)
+                {
+                    break;
+                }
+                let Some(next) = cues.get(last + 1) else {
+                    break;
+                };
+                if next.bar != cues[last].bar {
+                    break;
+                }
+                let next_event = &doc.bars[next.bar].events[next.event];
+                if !next_event.notes.iter().any(|n| n.string == note.string) {
+                    break;
+                }
+                last += 1;
+            }
+            let secs = cues[last].end - cue.start;
+
+            let (offset, gain, secs) = match note.tech {
+                model::Technique::Bend { quarters } | model::Technique::PreBend { quarters } => {
+                    (quarters as f32 / 2.0, NOTE_GAIN, secs)
+                }
+                model::Technique::Harmonic | model::Technique::PinchHarmonic => {
+                    (harmonic_offset(note.fret), NOTE_GAIN, secs)
+                }
+                model::Technique::Ghost => (0.0, NOTE_GAIN * 0.5, secs),
+                model::Technique::Dead => (0.0, NOTE_GAIN * 0.4, 0.05),
+                _ => (0.0, NOTE_GAIN, secs),
+            };
+            let midi = doc.pitch(note) as f32 + offset;
+            out.push(Tone {
+                time: cue.start,
+                freq: 440.0 * 2f32.powf((midi - 69.0) / 12.0),
+                secs: secs.min(MAX_TONE_SECS),
+                gain,
+            });
+        }
+    }
+    out
 }
 
 impl Default for LiveState {
@@ -211,7 +345,7 @@ impl Default for LiveState {
             speed: 1.0,
             zoom: 9.0,
             t: 0.0,
-            metronome_on: true,
+            mix: 0.0,
             count_in_bars: 2,
             count_in: None,
             flash: None,
@@ -227,6 +361,7 @@ impl LiveState {
         let source = doc.clone();
         let doc = engrave::for_export(doc);
         let cues = engrave::timeline(&doc);
+        let tones = tones(&doc, &cues);
         self.open = true;
         self.playing = false;
         self.t = 0.0;
@@ -239,6 +374,7 @@ impl LiveState {
             tempo: doc.tempo,
             bars: doc.bars.len(),
             cues,
+            tones,
             strip: layout::strip(&doc),
             pages: layout::paginate(&doc),
             source,
@@ -263,14 +399,27 @@ fn cue_index(cues: &[Cue], t: f32) -> usize {
     cues.partition_point(|c| c.start <= t).saturating_sub(1)
 }
 
-/// The beats whose moment falls in `[prev, now)`. Recomputed from the current
-/// position every frame (two binary searches, not a running cursor) so a seek --
-/// a bar jump, the position slider, "back to start" -- can never desync it into
-/// replaying a beat already passed or firing a burst of beats it skipped over.
-fn beats_crossed(beats: &[Beat], prev: f32, now: f32) -> &[Beat] {
-    let start = beats.partition_point(|b| b.time < prev);
-    let end = beats.partition_point(|b| b.time < now);
-    &beats[start..end]
+/// The items (by their `time`) that fall in `[prev, now)`. Recomputed from the
+/// current position every frame (two binary searches, not a running cursor) so
+/// a seek -- a bar jump, the position slider, "back to start" -- can never
+/// desync it into replaying a beat or note already passed, or firing a burst of
+/// everything it skipped over. Shared by the metronome grid and the tone list:
+/// both are just "things with a time," sorted.
+fn crossed<T>(items: &[T], time: impl Fn(&T) -> f32, prev: f32, now: f32) -> &[T] {
+    let start = items.partition_point(|x| time(x) < prev);
+    let end = items.partition_point(|x| time(x) < now);
+    &items[start..end]
+}
+
+/// Equal-power crossfade: both sides sit at ~0.71 in the middle, so sliding the
+/// fader never dips the total loudness the way a linear (1-x, x) pair does.
+/// Returns `(metronome gain, piece gain)`.
+fn fader(mix: f32) -> (f32, f32) {
+    let a = mix.clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2;
+    // cos(FRAC_PI_2) is -4e-8 in f32, not exactly 0 -- the `max` is what makes a
+    // fader hard right (or hard left, for `sin` at 0) truly silent instead of a
+    // hiss 148 dB down.
+    (a.cos().max(0.0), a.sin().max(0.0))
 }
 
 /// Build a fresh count-in: `bars` bars of `sig`, silent but for the metronome,
@@ -429,6 +578,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
     if state.playing {
         let dt = ui.input(|i| i.stable_dt).min(MAX_FRAME_SECS) * state.speed;
         let now = ui.input(|i| i.time);
+        let prev_t = state.t;
 
         // The count-in and the piece share one clock each, but never both at
         // once: while a count-in holds, it alone advances and `t` sits still at
@@ -437,13 +587,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
             Some(ci) => {
                 let prev = ci.t;
                 ci.t += dt;
-                let hits: Vec<Beat> = beats_crossed(&ci.beats, prev, ci.t).to_vec();
+                let hits: Vec<Beat> = crossed(&ci.beats, |b| b.time, prev, ci.t).to_vec();
                 (hits, ci.t >= ci.duration)
             }
             None => {
                 let prev = state.t;
                 state.t += dt;
-                let hits: Vec<Beat> = beats_crossed(&show.beats, prev, state.t).to_vec();
+                let hits: Vec<Beat> = crossed(&show.beats, |b| b.time, prev, state.t).to_vec();
                 (hits, state.t >= show.duration)
             }
         };
@@ -457,16 +607,28 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
             }
         }
 
-        if state.metronome_on {
+        let (met_gain, piece_gain) = fader(state.mix);
+
+        if met_gain > 0.0 {
             for beat in &fired {
                 if let Some(audio) = &state.audio {
-                    audio.click(beat.downbeat);
+                    audio.click(beat.downbeat, met_gain);
                 }
                 state.flash = Some(Flash {
                     at: now,
                     color: beat_color(beat),
                     number: beat.index_in_bar + 1,
                 });
+            }
+        }
+
+        // A count-in is silent by definition and `t` does not move under one, so
+        // the piece only ever sounds on its own clock.
+        if piece_gain > 0.0 && state.count_in.is_none() {
+            if let Some(audio) = &state.audio {
+                for tone in crossed(&show.tones, |x| x.time, prev_t, state.t) {
+                    audio.note(tone.freq, tone.secs / state.speed, tone.gain * piece_gain);
+                }
             }
         }
 
@@ -491,7 +653,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
                 state.count_in = None;
             }
             ui.separator();
-            ui.checkbox(&mut state.metronome_on, t("live.metronome"));
+            ui.label(t("live.metronome"));
+            ui.spacing_mut().slider_width = 90.0;
+            ui.add(egui::Slider::new(&mut state.mix, 0.0..=1.0).show_value(false));
+            ui.label(t("live.piece"));
             ui.label(t("live.count_in"));
             ui.add(egui::DragValue::new(&mut state.count_in_bars).range(COUNT_IN_RANGE));
             ui.separator();
@@ -778,5 +943,75 @@ mod tests {
         // Green rises monotonically pink -> yellow; a strict, simple proxy for
         // "the ramp moves the right way and doesn't double back".
         assert!(colors[0].g() < colors[1].g() && colors[1].g() < colors[2].g());
+    }
+
+    #[test]
+    fn a_beat_split_tie_sounds_once_for_its_full_length() {
+        // Two quarter notes on the open low E, tied: `for_export` produces exactly
+        // this shape when a note straddles a beat, and only the first piece should
+        // be struck.
+        let mut doc = Document::new_empty();
+        doc.bars = vec![model::Bar {
+            events: vec![
+                model::Event {
+                    dur: model::Dur {
+                        base: model::NoteValue::Quarter,
+                        dots: 0,
+                    },
+                    notes: vec![model::Note {
+                        string: 5,
+                        fret: 0,
+                        tech: model::Technique::Plain,
+                        tie_next: true,
+                    }],
+                    ..Default::default()
+                },
+                model::Event {
+                    dur: model::Dur {
+                        base: model::NoteValue::Quarter,
+                        dots: 0,
+                    },
+                    notes: vec![model::Note {
+                        string: 5,
+                        fret: 0,
+                        tech: model::Technique::Plain,
+                        tie_next: false,
+                    }],
+                    ..Default::default()
+                },
+            ],
+            time_sig: Some((4, 4)),
+            ..Default::default()
+        }];
+
+        let cues = engrave::timeline(&doc);
+        let out = tones(&doc, &cues);
+
+        assert_eq!(out.len(), 1, "the tied continuation must not sound again");
+        assert_eq!(out[0].time, 0.0);
+        assert!((out[0].secs - (cues[1].end - cues[0].start)).abs() < 1e-6);
+        let open_low_e = 440.0 * 2f32.powf((40.0 - 69.0) / 12.0); // string 5 open, standard tuning
+        assert!(
+            (out[0].freq - open_low_e).abs() < 0.01,
+            "expected {open_low_e}, got {}",
+            out[0].freq
+        );
+    }
+
+    #[test]
+    fn fader_is_equal_power_and_mutes_each_side_at_its_own_end() {
+        assert_eq!(fader(0.0), (1.0, 0.0));
+        let (met, piece) = fader(1.0);
+        assert_eq!(met, 0.0);
+        assert!((piece - 1.0).abs() < 1e-6);
+
+        for i in 0..=20 {
+            let mix = i as f32 / 20.0;
+            let (met, piece) = fader(mix);
+            assert!(
+                (met * met + piece * piece - 1.0).abs() < 1e-5,
+                "mix {mix}: {met}^2 + {piece}^2 != 1"
+            );
+        }
     }
 }

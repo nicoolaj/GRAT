@@ -93,6 +93,7 @@
   "live.pause": "Pause",
   "live.restart": "Retour au début",
   "live.metronome": "Métronome",
+  "live.piece": "Morceau",
   "live.count_in": "Décompte",
   "live.speed": "Vitesse",
   "live.bpm": "bpm",

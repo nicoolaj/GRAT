@@ -48,7 +48,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs, strum row, rhythm stems |
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, hit boxes |
 | `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette |
-| `live.rs` | the live player: transport, the two scrolling views, the highlighter, the metronome (click + flash + count-in). A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. The metronome click is macOS/Windows only — see "Verified API facts" |
+| `live.rs` | the live player: transport, the two scrolling views, the highlighter, the metronome (click + flash + count-in), and the piece's own sound (one decaying tone per note) crossfaded against the click. A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. Both the click and the note synthesis are macOS/Windows only — see "Verified API facts" |
 | `pdf.rs` | `Prim` → printpdf ops |
 | `main.rs` | window, theme, menus, dialogs, shortcuts, launch splash, `--export` CLI |
 
@@ -77,13 +77,15 @@ never know about pages, egui or PDF.
    the exception.
 7. **The library stays GUI-free.** `cargo test` and the `--export` CLI must work without opening a
    window, which is why `canvas.rs` is a module of the binary.
-8. **The live player's cues, metronome beats, strip and pages all come from one
+8. **The live player's cues, metronome beats, tones, strip and pages all come from one
    `engrave::for_export` of the document.** That call trims the editor's trailing blank bars,
    rewrites its per-beat rests and splits notes at beat boundaries into tied pieces, all of which
    renumbers events — so a cue's `(bar, event)` only addresses the
-   right column if the geometry was built from the very same normalised document, and the metronome
-   grid only counts the right number of bars if it walks that same document too.
-   `LiveState::enter` builds all four together for exactly that reason; don't split it up. A
+   right column if the geometry was built from the very same normalised document, the metronome
+   grid only counts the right number of bars if it walks that same document too, and the tone list
+   only strikes the right pitch at the right moment if it reads ties (`Note::tie_next`) off that
+   same document rather than the editor's own.
+   `LiveState::enter` builds all five together for exactly that reason; don't split it up. A
    count-in's own beat grid is the one exception: built fresh per play, from a throwaway document of
    empty bars, not from `Show` — see `live::start_count_in`.
 9. **Fret labels contain `<`, `>`, `(`, `)`** (harmonics `<12>`, ghost notes `(5)`, trills `5(9)`).
@@ -152,6 +154,13 @@ never know about pages, egui or PDF.
   `live.rs` carries a `#[cfg(target_os = "linux")]` no-op stub of the same `click::Audio` API instead
   of carrying an ALSA sysroot as a new host-setup step. Revisit only alongside a real Linux ALSA (or
   PipeWire) dev sysroot wired into `check-zigbuild`, not by flipping the feature back on alone.
+- **rodio 0.22 note synthesis**, verified against the vendored 0.22.2 source
+  (`source/{fadeout,triangle}.rs`, `mixer.rs`): `Source::fade_out(d)` is a linear gain ramp
+  1.0 → 0.0 that starts immediately, not after a delay; `TriangleWave::new(freq)` sits right next
+  to `SineWave` at `rodio::source::TriangleWave`; and `Mixer::add<T: Source + Send + 'static>`
+  just sums whatever is currently playing — there is no gain-staging — which is why a chord's
+  several simultaneous strings need a low per-note base gain rather than each playing at full
+  amplitude.
 
 ## Recipes
 
@@ -217,6 +226,7 @@ produces a PNG.
 ## Out of scope for v1 — ask before building
 
 Tuplets (triplets); ties across a barline; da capo / segno and alternate endings (1./2.); MusicXML
-or Guitar Pro import and export; multi-level undo beyond the snapshot stack. MIDI playback, and
-audio playback of the piece's own notes, are still out of scope — the live-mode metronome (`live.rs`)
-is a synthesised click marking time, not a synthesiser for what the tablature says to play.
+or Guitar Pro import and export; multi-level undo beyond the snapshot stack. MIDI (files, devices,
+soundfonts) is still out of scope: live mode's own sound (`live.rs`), both the metronome click and
+the piece's own notes, is one synthesised oscillator per sound (a sine tick, a decaying triangle
+wave per note) — never a soundfont, never an import of anyone else's audio format.
