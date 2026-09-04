@@ -695,9 +695,13 @@ fn beam_span(time_sig: (u8, u8), bar: &Bar) -> u32 {
     let beat = beat_ticks(time_sig).max(1);
     let (num, den) = time_sig;
     let compound = den >= 8 && num % 3 == 0 && num > 3;
+    // "The fastest *note*" -- a stray short rest (the editor backfills freed time
+    // with sixteenth rests) must not drag the window down to one beat and undo the
+    // half-bar grouping the actual notes call for.
     let shortest = bar
         .events
         .iter()
+        .filter(|e| !e.is_rest())
         .map(|e| e.dur.ticks())
         .min()
         .unwrap_or(beat);
@@ -710,12 +714,19 @@ fn beam_span(time_sig: (u8, u8), bar: &Bar) -> u32 {
     }
 }
 
-/// Group the bar's events into beams, one [`beam_span`] window at a time.
+/// Group the bar's events into beams, breaking at each [`beam_span`] boundary.
 ///
-/// Rules applied, which are the conventional ones: beams never cross a span
-/// boundary (a beat, or the bar's midpoint in running-quaver common time); rests
-/// and notes of a quarter or longer break a run; a run of a single beamable event
-/// is left to be drawn with a flag instead.
+/// Rules applied, which are the conventional ones: rests and notes of a quarter or
+/// longer break a run; a run of a single beamable event is left to be drawn with a
+/// flag instead; and a new beam starts at a span boundary (a beat, or the bar's
+/// midpoint in running-quaver common time) *only when a note actually begins on
+/// it*. A note that merely sustains across the boundary -- a syncopation, like the
+/// middle quaver of `8th. 8th. 8th` filling beats 1-2 -- stays in the beam, its
+/// offset shown by the note values, not by a broken beam.
+///
+/// ponytail: a note longer than the span that straddles a boundary without landing
+/// on it (e.g. `8th.` x4 across 4/4) will still carry the beam across -- rare, and
+/// arguably right for that cross-rhythm. Add a hard midpoint break if it bites.
 pub fn beam_groups(doc: &Document, bar_index: usize) -> Vec<BeamGroup> {
     let Some(bar) = doc.bars.get(bar_index) else {
         return Vec::new();
@@ -725,25 +736,17 @@ pub fn beam_groups(doc: &Document, bar_index: usize) -> Vec<BeamGroup> {
 
     let mut groups = Vec::new();
     let mut run: Vec<usize> = Vec::new();
-    let mut run_group = 0_u32;
 
     for (i, event) in bar.events.iter().enumerate() {
         let beamable = !event.is_rest() && event.dur.base.flags() >= 1;
-        let this_group = onsets[i] / span;
-
-        if beamable && (run.is_empty() || this_group == run_group) {
-            if run.is_empty() {
-                run_group = this_group;
-            }
-            run.push(i);
+        if !beamable {
+            flush(&mut run, bar, &mut groups);
             continue;
         }
-
-        flush(&mut run, bar, &mut groups);
-        if beamable {
-            run_group = this_group;
-            run.push(i);
+        if !run.is_empty() && onsets[i].is_multiple_of(span) {
+            flush(&mut run, bar, &mut groups);
         }
+        run.push(i);
     }
     flush(&mut run, bar, &mut groups);
     groups

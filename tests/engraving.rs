@@ -25,6 +25,14 @@ fn ev(base: NoteValue, notes: Vec<Note>) -> Event {
     }
 }
 
+fn dotted(base: NoteValue, notes: Vec<Note>) -> Event {
+    Event {
+        dur: Dur { base, dots: 1 },
+        notes,
+        ..Default::default()
+    }
+}
+
 fn doc_with(bar: Bar) -> Document {
     let mut doc = Document::new_empty();
     doc.bars = vec![bar];
@@ -46,6 +54,62 @@ fn running_eighths_beam_in_half_bar_groups_in_common_time() {
     assert_eq!(groups.len(), 2, "two half-bar groups: {groups:?}");
     assert_eq!(groups[0].events, vec![0, 1, 2, 3]);
     assert_eq!(groups[1].events, vec![4, 5, 6, 7]);
+}
+
+#[test]
+fn short_rests_do_not_defeat_half_bar_grouping() {
+    // Six quavers then a beat of rest the editor backfilled as two semiquaver
+    // rests plus a quaver rest. The fastest *note* is still a quaver, so the six
+    // notes stay in two half-bar groups -- the short rests must not count.
+    let mut events: Vec<Event> = (0..6)
+        .map(|i| ev(NoteValue::Eighth, vec![note(i)]))
+        .collect();
+    events.push(ev(NoteValue::Sixteenth, vec![]));
+    events.push(ev(NoteValue::Sixteenth, vec![]));
+    events.push(ev(NoteValue::Eighth, vec![]));
+    let doc = doc_with(Bar {
+        events,
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    let groups = beam_groups(&doc, 0);
+    assert_eq!(groups.len(), 2, "two half-bar groups: {groups:?}");
+    assert_eq!(groups[0].events, vec![0, 1, 2, 3]);
+    assert_eq!(groups[1].events, vec![4, 5]);
+}
+
+#[test]
+fn a_note_sustaining_across_a_beat_keeps_the_beam() {
+    // `8th. 8th. 8th` filling beats 1-2: the middle dotted quaver (onset 720)
+    // sustains across the beat boundary at 960. No note begins on that boundary,
+    // so the three stay in one beam -- not [0,1] plus a lone flagged 2.
+    // (From bar 0 of "Don't Stop 'Til You Get Enough".)
+    let doc = doc_with(Bar {
+        events: vec![
+            dotted(NoteValue::Eighth, vec![note(4)]),
+            dotted(NoteValue::Eighth, vec![note(4)]),
+            ev(NoteValue::Eighth, vec![note(4)]),
+            ev(NoteValue::Sixteenth, vec![note(2)]),
+            ev(NoteValue::Eighth, vec![note(4)]),
+            ev(NoteValue::Sixteenth, vec![note(4)]),
+            ev(NoteValue::Eighth, vec![]), // rest
+            ev(NoteValue::Eighth, vec![]), // rest
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    let groups = beam_groups(&doc, 0);
+    assert_eq!(groups.len(), 2, "{groups:?}");
+    assert_eq!(
+        groups[0].events,
+        vec![0, 1, 2],
+        "beats 1-2 beam as one unit"
+    );
+    assert_eq!(
+        groups[1].events,
+        vec![3, 4, 5],
+        "beat 3's run, started on the beat"
+    );
 }
 
 #[test]
