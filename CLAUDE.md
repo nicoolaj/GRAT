@@ -42,7 +42,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 |---|---|
 | `model.rs` | `Document` / `Bar` / `Event` / `Note`, note values in ticks, techniques and their colours, serde |
 | `i18n.rs` + `i18n/*.json` | locale detection, `t(key)`, note and rest names (they differ FR/US) |
-| `engrave.rs` | rhythm only: beat grouping, beams, proportional spacing, justification. No pitch, no glyphs |
+| `engrave.rs` | rhythm only: beat grouping, beams, proportional spacing, justification, and the print normalisation (`for_export`: merge rests, split notes straddling a beat into tied pieces). No pitch, no glyphs |
 | `staff.rs` | furniture both rows share: barlines and repeats, rests, arrowheads, waves, text metrics |
 | `notation.rs` | the five-line staff: clef, heads, stems, beams, accidentals, ties, ledger lines |
 | `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs, strum row, rhythm stems |
@@ -78,8 +78,9 @@ never know about pages, egui or PDF.
 7. **The library stays GUI-free.** `cargo test` and the `--export` CLI must work without opening a
    window, which is why `canvas.rs` is a module of the binary.
 8. **The live player's cues, metronome beats, strip and pages all come from one
-   `engrave::for_export` of the document.** That call trims the editor's trailing blank bars and
-   rewrites its per-beat rests, which renumbers events — so a cue's `(bar, event)` only addresses the
+   `engrave::for_export` of the document.** That call trims the editor's trailing blank bars,
+   rewrites its per-beat rests and splits notes at beat boundaries into tied pieces, all of which
+   renumbers events — so a cue's `(bar, event)` only addresses the
    right column if the geometry was built from the very same normalised document, and the metronome
    grid only counts the right number of bars if it walks that same document too.
    `LiveState::enter` builds all four together for exactly that reason; don't split it up. A

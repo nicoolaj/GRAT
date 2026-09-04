@@ -112,6 +112,94 @@ fn a_note_sustaining_across_a_beat_keeps_the_beam() {
     );
 }
 
+/// Durations and tie flags of a bar, the shape a printed page actually shows.
+fn printed(doc: &Document, bar: usize) -> Vec<(u32, bool)> {
+    grat::engrave::for_export(doc).bars[bar]
+        .events
+        .iter()
+        .map(|e| (e.dur.ticks(), e.notes.iter().any(|n| n.tie_next)))
+        .collect()
+}
+
+#[test]
+fn a_note_straddling_a_beat_is_split_and_tied_for_print() {
+    // `8th. 8th. 8th` over beats 1-2: the middle quaver starts off the beat and
+    // runs past it, hiding where beat 2 falls. Print cuts it at the boundary and
+    // sews it back with a tie -- `8th. | 16th ~ 8th | 8th` -- so the beams show
+    // both beats. (Bar 0 of "Don't Stop 'Til You Get Enough".)
+    let doc = doc_with(Bar {
+        events: vec![
+            dotted(NoteValue::Eighth, vec![note(4)]),
+            dotted(NoteValue::Eighth, vec![note(4)]),
+            ev(NoteValue::Eighth, vec![note(4)]),
+            ev(NoteValue::Quarter, vec![note(2)]),
+            ev(NoteValue::Quarter, vec![]), // rest, one beat
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    assert_eq!(
+        printed(&doc, 0),
+        vec![
+            (720, false), // 8th.  on the beat, left whole
+            (240, true),  // 16th ~ the cut, tied...
+            (480, false), // 8th   ...across beat 2
+            (480, false), // 8th
+            (960, false), // quarter
+            (960, false), // quarter rest
+        ]
+    );
+
+    // Two beamed pairs, one per beat, which is the whole point of the split.
+    let groups = beam_groups(&grat::engrave::for_export(&doc), 0);
+    assert_eq!(groups.len(), 2, "{groups:?}");
+    assert_eq!(groups[0].events, vec![0, 1], "8th. + 16th, beat 1");
+    assert_eq!(groups[1].events, vec![2, 3], "8th + 8th, beat 2");
+}
+
+#[test]
+fn a_note_starting_on_the_beat_is_never_split() {
+    // A half note on beat 1 spans the beat boundary at 960 and the bar's midpoint,
+    // and is still a half note -- not two or four tied quarters.
+    let doc = doc_with(Bar {
+        events: vec![
+            ev(NoteValue::Half, vec![note(4)]),
+            ev(NoteValue::Half, vec![note(4)]),
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    assert_eq!(printed(&doc, 0), vec![(1920, false), (1920, false)]);
+}
+
+#[test]
+fn an_off_grid_bar_is_not_shattered_into_tied_thirty_seconds() {
+    // Bar 1 of the same song: a dotted sixteenth where a quaver belongs leaves the
+    // bar 120 ticks short and every later onset off the grid. Splitting there
+    // would need thirty-second fragments; better to print the bar as written and
+    // let the incomplete-bar warning carry the news.
+    let doc = doc_with(Bar {
+        events: vec![
+            dotted(NoteValue::Eighth, vec![note(4)]),
+            dotted(NoteValue::Eighth, vec![note(4)]),
+            dotted(NoteValue::Sixteenth, vec![note(2)]), // 360 -- the typo
+            ev(NoteValue::Eighth, vec![note(4)]),        // onset 1800, crosses 1920
+            ev(NoteValue::Sixteenth, vec![note(4)]),
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    let printed = printed(&doc, 0);
+    assert!(
+        printed.iter().all(|&(ticks, _)| ticks >= 240),
+        "nothing faster than the bar's own sixteenths: {printed:?}"
+    );
+    assert!(
+        !is_complete(&doc.bars[0], (4, 4)),
+        "and the bar is still reported incomplete"
+    );
+}
+
 #[test]
 fn a_sixteenth_pulls_common_time_beaming_back_to_the_beat() {
     // As soon as anything faster than a quaver is in the bar, the beat has to stay

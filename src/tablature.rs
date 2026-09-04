@@ -202,6 +202,16 @@ fn tab_label(x: f32, y0: f32, out: &mut Vec<Prim>) {
     }
 }
 
+/// True when this event's note on `string` is a tie's continuation rather than a
+/// fresh attack.
+fn tied_from_prev(bar: &Bar, ei: usize, string: u8) -> bool {
+    ei > 0
+        && bar.events[ei - 1]
+            .notes
+            .iter()
+            .any(|n| n.string == string && n.tie_next)
+}
+
 /// Fret numbers, clickable cells and technique glyphs for one bar.
 fn render_bar(
     doc: &Document,
@@ -247,6 +257,32 @@ fn render_bar(
 
         for note in &event.notes {
             let y = string_y(origin, note.string);
+
+            // A tie's continuation is not picked again. Printing its fret number
+            // would read as a second attack, so the tab shows only the arc that
+            // carries the sound over -- the same thing the notation staff draws.
+            if tied_from_prev(bar, ei, note.string) {
+                continue;
+            }
+            if note.tie_next {
+                if let Some(&nx) = layout.events.get(ei + 1) {
+                    let half = label_width(&fret_label(note), pt_for_cap(cap)) * 0.5;
+                    out.push(arc(
+                        P {
+                            x: x + half + 0.5,
+                            y: y - cap * 0.35,
+                        },
+                        P {
+                            x: origin.x + nx,
+                            y: y - cap * 0.35,
+                        },
+                        -cap * 0.55,
+                        0.22 * scale(doc),
+                        technique_color(&note.tech),
+                    ));
+                }
+            }
+
             let grace = matches!(note.tech, Technique::Grace);
             let pt = pt_for_cap(if grace { cap * 0.72 } else { cap });
             let text = fret_label(note);

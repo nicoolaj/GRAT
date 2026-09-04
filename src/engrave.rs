@@ -609,10 +609,92 @@ pub fn for_export(doc: &Document) -> Document {
 
     for i in 0..doc.bars.len() {
         let sig = doc.time_sig_at(i); // read before the &mut below -- borrowck
+        split_notes_at_beats(&mut doc.bars[i], sig);
         merge_bar_rests(&mut doc.bars[i], sig);
     }
 
     doc
+}
+
+/// Re-spell notes so none hides a beat: a note that begins **off** the beat and
+/// runs **past** the next beat boundary is cut there, and the pieces rejoined by a
+/// tie.
+///
+/// This is the note-side twin of [`emit_rests`], and it is what makes a
+/// syncopation print the way a player reads it. `8th. 8th. 8th` over beats 1-2 of
+/// 4/4 -- the middle quaver straddling the beat -- becomes
+/// `8th. | 16th ~ 8th | 8th`: two beamed groups that show both beats, with a tie
+/// carrying the sound across. Writing the straddling note as one dotted value
+/// instead hides where beat 2 falls, which is the thing notation exists to show.
+///
+/// A note that *starts* on a beat is left whole however long it is: a half note on
+/// beat 1 is a half note, not two tied quarters.
+///
+/// Only the first piece is struck. The continuations drop the strum and the
+/// technique glyph, or the page would show a second pick and a second bend arrow
+/// for one sounded note.
+///
+/// ponytail: cuts at beats only. Gould also asks a long off-beat note not to hide
+/// the middle of a 4/4 bar; beats are what the eye reads first, so that rule waits
+/// until a real piece needs it.
+fn split_notes_at_beats(bar: &mut Bar, time_sig: (u8, u8)) {
+    let beat = beat_ticks(time_sig).max(1);
+    // A tie is there to clarify the beat, and a sixteenth is as fine a grain as
+    // that ever needs -- unless the music is already quicker, in which case its
+    // own fastest note is the floor. Below it lies nothing but new rhythmic levels
+    // the reader was not asked to parse: an off-grid bar (which the
+    // incomplete-bar warning already flags) would shatter into tied
+    // thirty-seconds rather than admit it is off-grid.
+    let floor = NoteValue::Sixteenth
+        .ticks()
+        .min(fastest_note(bar).unwrap_or(u32::MAX));
+    let mut out: Vec<Event> = Vec::with_capacity(bar.events.len());
+    let mut t = 0u32;
+
+    for event in &bar.events {
+        let ticks = event.dur.ticks();
+        let boundary = (t / beat + 1) * beat;
+        if event.is_rest() || t.is_multiple_of(beat) || t + ticks <= boundary {
+            out.push(event.clone());
+            t += ticks;
+            continue;
+        }
+
+        // One piece per beat segment, each named by the fewest values `split_ticks`
+        // allows -- the same walk `emit_rests` does over a run of silence.
+        let mut pieces: Vec<Dur> = Vec::new();
+        let (mut a, end) = (t, t + ticks);
+        while a < end {
+            let b = ((a / beat + 1) * beat).min(end);
+            pieces.extend(split_ticks(b - a));
+            a = b;
+        }
+
+        if pieces.iter().any(|d| d.ticks() < floor) {
+            out.push(event.clone());
+            t += ticks;
+            continue;
+        }
+
+        let last = pieces.len().saturating_sub(1);
+        for (i, dur) in pieces.into_iter().enumerate() {
+            let mut piece = event.clone();
+            piece.dur = dur;
+            if i > 0 {
+                piece.strum = None;
+                for note in &mut piece.notes {
+                    note.tech = Technique::Plain;
+                }
+            }
+            for note in &mut piece.notes {
+                note.tie_next |= i < last;
+            }
+            out.push(piece);
+        }
+        t += ticks;
+    }
+
+    bar.events = out;
 }
 
 /// Rewrite `bar.events` so runs of consecutive rests read the way a score is
@@ -686,6 +768,19 @@ pub struct BeamGroup {
     pub beams: Vec<u8>,
 }
 
+/// Ticks of the shortest **note** in the bar -- the fastest rhythmic level the
+/// reader is already being asked to parse. `None` for a bar of nothing but rests.
+///
+/// Rests are excluded on purpose: the editor backfills freed time with sixteenth
+/// rests, and those must not pass for what the music is actually made of.
+fn fastest_note(bar: &Bar) -> Option<u32> {
+    bar.events
+        .iter()
+        .filter(|e| !e.is_rest())
+        .map(|e| e.dur.ticks())
+        .min()
+}
+
 /// Ticks spanned by one beam group: the window inside which consecutive beamable
 /// events are joined under a beam.
 ///
@@ -703,16 +798,7 @@ fn beam_span(time_sig: (u8, u8), bar: &Bar) -> u32 {
     let beat = beat_ticks(time_sig).max(1);
     let (num, den) = time_sig;
     let compound = den >= 8 && num % 3 == 0 && num > 3;
-    // "The fastest *note*" -- a stray short rest (the editor backfills freed time
-    // with sixteenth rests) must not drag the window down to one beat and undo the
-    // half-bar grouping the actual notes call for.
-    let shortest = bar
-        .events
-        .iter()
-        .filter(|e| !e.is_rest())
-        .map(|e| e.dur.ticks())
-        .min()
-        .unwrap_or(beat);
+    let shortest = fastest_note(bar).unwrap_or(beat);
     let quaver_is_fastest =
         (NoteValue::Eighth.ticks()..NoteValue::Quarter.ticks()).contains(&shortest);
     if !compound && num >= 4 && quaver_is_fastest {

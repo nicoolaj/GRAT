@@ -694,26 +694,33 @@ fn ties(
             else {
                 continue;
             };
-            // The tie bulges away from the stem and clears both heads.
-            let bulge = if up { -0.9 * sp } else { 0.9 * sp };
+            // A tie bulges away from the stems, and so hangs below -- the smile a
+            // reader looks for -- whenever either note's stem points up. That
+            // covers the pair straddling a beat, whose two halves routinely land
+            // in beam groups with opposite stems; only a pair stemmed down on
+            // both sides puts the tie above, where nothing collides with it.
+            let sign = if up || next_up { -1.0 } else { 1.0 };
             let a = P {
                 x: head.x + HEAD_RX * sp * 1.15,
-                y: head.y + bulge * 0.3,
+                y: head.y + sign * 0.30 * sp,
             };
             let b = P {
                 x: target.x - HEAD_RX * sp * 1.15,
-                y: target.y + bulge * 0.3,
+                y: target.y + sign * 0.30 * sp,
             };
             let span = (b.x - a.x).max(0.1);
+            // Shallow, and shallower still on a short tie: a fixed depth turns the
+            // gap between two adjacent heads into a croquet hoop.
+            let depth = sign * (0.62 * sp).min(span * 0.36);
             out.push(Prim::Curve {
                 a,
                 c1: P {
-                    x: a.x + span * 0.25,
-                    y: a.y + bulge,
+                    x: a.x + span * 0.22,
+                    y: a.y + depth,
                 },
                 c2: P {
-                    x: b.x - span * 0.25,
-                    y: b.y + bulge,
+                    x: b.x - span * 0.22,
+                    y: b.y + depth,
                 },
                 b,
                 w: 0.11 * sp,
