@@ -32,7 +32,9 @@ fn doc_with(bar: Bar) -> Document {
 }
 
 #[test]
-fn eighths_beam_by_beat_not_across_the_bar() {
+fn running_eighths_beam_in_half_bar_groups_in_common_time() {
+    // 4/4 whose fastest note is a quaver: two groups of four, split at the bar's
+    // midpoint -- not four pairs, and never a beam across the centre.
     let doc = doc_with(Bar {
         events: (0..8)
             .map(|i| ev(NoteValue::Eighth, vec![note(i)]))
@@ -41,8 +43,35 @@ fn eighths_beam_by_beat_not_across_the_bar() {
         ..Default::default()
     });
     let groups = beam_groups(&doc, 0);
-    assert_eq!(groups.len(), 4, "four beats of 4/4 give four beamed pairs");
-    assert!(groups.iter().all(|g| g.events.len() == 2));
+    assert_eq!(groups.len(), 2, "two half-bar groups: {groups:?}");
+    assert_eq!(groups[0].events, vec![0, 1, 2, 3]);
+    assert_eq!(groups[1].events, vec![4, 5, 6, 7]);
+}
+
+#[test]
+fn a_sixteenth_pulls_common_time_beaming_back_to_the_beat() {
+    // As soon as anything faster than a quaver is in the bar, the beat has to stay
+    // visible, so grouping reverts to one beat at a time.
+    let doc = doc_with(Bar {
+        events: vec![
+            ev(NoteValue::Eighth, vec![note(0)]),
+            ev(NoteValue::Eighth, vec![note(1)]),
+            ev(NoteValue::Eighth, vec![note(2)]),
+            ev(NoteValue::Eighth, vec![note(3)]),
+            ev(NoteValue::Sixteenth, vec![note(4)]),
+            ev(NoteValue::Sixteenth, vec![note(5)]),
+            ev(NoteValue::Sixteenth, vec![note(6)]),
+            ev(NoteValue::Sixteenth, vec![note(7)]),
+            ev(NoteValue::Quarter, vec![note(0)]),
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    let groups = beam_groups(&doc, 0);
+    assert_eq!(groups.len(), 3, "beat 1, beat 2, beat 3: {groups:?}");
+    assert_eq!(groups[0].events, vec![0, 1]);
+    assert_eq!(groups[1].events, vec![2, 3]);
+    assert_eq!(groups[2].events, vec![4, 5, 6, 7]);
 }
 
 #[test]

@@ -678,29 +678,62 @@ pub struct BeamGroup {
     pub beams: Vec<u8>,
 }
 
-/// Group the bar's events into beams, one beat at a time.
+/// Ticks spanned by one beam group: the window inside which consecutive beamable
+/// events are joined under a beam.
 ///
-/// Rules applied, which are the conventional ones: beams never cross a beat
-/// boundary; rests and notes of a quarter or longer break a run; a run of a single
-/// beamable event is left to be drawn with a flag instead.
+/// Normally one beat. But in a simple metre of four or more beats whose fastest
+/// note is a quaver, the convention (Gould, *Behind Bars*; Read, *Music Notation*)
+/// is to beam in wider groups that still expose the bar's midpoint -- 4/4 of
+/// running eighths reads as two groups of four, not four pairs. A sixteenth (or
+/// faster) anywhere in the bar pulls the window back to one beat, so the beat
+/// stays legible under the faster notes. Compound metres already group by their
+/// dotted beat and are left alone.
+///
+/// ponytail: only the 4/4 case is tuned. 2/4 and 3/4 fall through to the per-beat
+/// window (conventional enough); widen them here if a user asks.
+fn beam_span(time_sig: (u8, u8), bar: &Bar) -> u32 {
+    let beat = beat_ticks(time_sig).max(1);
+    let (num, den) = time_sig;
+    let compound = den >= 8 && num % 3 == 0 && num > 3;
+    let shortest = bar
+        .events
+        .iter()
+        .map(|e| e.dur.ticks())
+        .min()
+        .unwrap_or(beat);
+    let quaver_is_fastest =
+        (NoteValue::Eighth.ticks()..NoteValue::Quarter.ticks()).contains(&shortest);
+    if !compound && num >= 4 && quaver_is_fastest {
+        (beat * 2).min(bar_ticks(time_sig).max(beat))
+    } else {
+        beat
+    }
+}
+
+/// Group the bar's events into beams, one [`beam_span`] window at a time.
+///
+/// Rules applied, which are the conventional ones: beams never cross a span
+/// boundary (a beat, or the bar's midpoint in running-quaver common time); rests
+/// and notes of a quarter or longer break a run; a run of a single beamable event
+/// is left to be drawn with a flag instead.
 pub fn beam_groups(doc: &Document, bar_index: usize) -> Vec<BeamGroup> {
     let Some(bar) = doc.bars.get(bar_index) else {
         return Vec::new();
     };
-    let beat = beat_ticks(doc.time_sig_at(bar_index)).max(1);
+    let span = beam_span(doc.time_sig_at(bar_index), bar);
     let onsets = onsets(bar);
 
     let mut groups = Vec::new();
     let mut run: Vec<usize> = Vec::new();
-    let mut run_beat = 0_u32;
+    let mut run_group = 0_u32;
 
     for (i, event) in bar.events.iter().enumerate() {
         let beamable = !event.is_rest() && event.dur.base.flags() >= 1;
-        let this_beat = onsets[i] / beat;
+        let this_group = onsets[i] / span;
 
-        if beamable && (run.is_empty() || this_beat == run_beat) {
+        if beamable && (run.is_empty() || this_group == run_group) {
             if run.is_empty() {
-                run_beat = this_beat;
+                run_group = this_group;
             }
             run.push(i);
             continue;
@@ -708,7 +741,7 @@ pub fn beam_groups(doc: &Document, bar_index: usize) -> Vec<BeamGroup> {
 
         flush(&mut run, bar, &mut groups);
         if beamable {
-            run_beat = this_beat;
+            run_group = this_group;
             run.push(i);
         }
     }
