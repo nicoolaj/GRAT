@@ -3,7 +3,10 @@
 </p>
 
 <p align="center">
+  <b>Docs: </b>
   <a href="README.FR.md">Français</a> ·
-  <a href="README.EN.md">English</a> ·
+  <a href="README.EN.md">English</a>
+  <br/>
+  <a href="https://github.com/nicoolaj/GRAT/releases">Releases</a> ·
   <a href="LICENSE">Licence CC BY-NC-SA 4.0</a>
 </p>
