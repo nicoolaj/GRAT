@@ -16,10 +16,11 @@ make lint      # cargo clippy --all-targets -- -D warnings
 make build     # release binary into dist/
 make app       # dist/GRAT.app (macOS)
 make examples  # regenerate exemples/*.pdf
+make audit     # cargo audit + cargo deny check (needs: cargo install cargo-audit cargo-deny)
 ```
 
-Verify with `cargo build`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`.
-All four must be clean before a commit.
+Verify with `cargo build`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`,
+`make audit`. All five must be clean before a commit.
 
 **End of every iteration: bump the version and tag it.** Raise `version` in `Cargo.toml`
 (semver: patch for a fix, minor for a feature, major for a break), commit that bump, then

@@ -1,11 +1,12 @@
 [package]
 name = "grat"
-version = "2.5.0"
+version = "2.6.0"
 edition = "2021"
 authors = ["Nicolas Jalibert <nicoolaj@gmail.com>"]
 description = "Six-string guitar tablature editor: place notes by mouse, print an A4 PDF"
 repository = "https://github.com/nicoolaj"
 license = "CC-BY-NC-SA-4.0"
+publish = false
 
 # lib + bin: the core (model, engraving, layout, PDF) is a library that is testable
 # without a GUI; the binary only adds eframe/canvas/menu on top.

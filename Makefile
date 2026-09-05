@@ -1,4 +1,4 @@
-.PHONY: help run build debug app logo-assets examples test fmt lint clean check-zigbuild \
+.PHONY: help run build debug app logo-assets examples test fmt lint audit clean check-zigbuild \
 	dist-cross dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64
 
 help:
@@ -13,6 +13,7 @@ help:
 	@echo "  test        cargo test"
 	@echo "  fmt         cargo fmt"
 	@echo "  lint        cargo clippy --all-targets -- -D warnings"
+	@echo "  audit       cargo audit (vulnerabilities) + cargo deny check (licenses/bans/sources)"
 	@echo "  clean       cargo clean && rm -rf dist/* build"
 
 run:
@@ -106,6 +107,13 @@ fmt:
 
 lint:
 	cargo clippy --all-targets -- -D warnings
+
+# One-time setup: cargo install cargo-audit cargo-deny
+audit:
+	@cargo audit --help >/dev/null 2>&1 || { echo "cargo-audit missing — run: cargo install cargo-audit"; exit 1; }
+	@cargo deny --help >/dev/null 2>&1 || { echo "cargo-deny missing — run: cargo install cargo-deny"; exit 1; }
+	cargo audit
+	cargo deny check
 
 clean:
 	cargo clean
