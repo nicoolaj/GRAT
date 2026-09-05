@@ -385,6 +385,19 @@ impl Bar {
             repeat_end: None,
         }
     }
+
+    /// The next event in this bar that plays the same string -- the partner of a
+    /// hammer-on, pull-off, slide or trill; a pure data query, so both
+    /// `tablature`'s glyphs and `live`'s pitch programme (which needs it for a
+    /// slide's destination) share this one implementation.
+    pub fn next_on_string(&self, from: usize, string: u8) -> Option<usize> {
+        self.events
+            .iter()
+            .enumerate()
+            .skip(from + 1)
+            .find(|(_, e)| e.notes.iter().any(|n| n.string == string))
+            .map(|(i, _)| i)
+    }
 }
 
 /// How many staff lines (tab / strum / notation) make up one block.

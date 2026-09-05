@@ -75,17 +75,6 @@ fn string_y(origin: P, string: u8) -> f32 {
     origin.y + (5 - string.min(5)) as f32 * STRING_MM
 }
 
-/// The next event in this bar that plays the same string — the partner of a
-/// hammer-on, pull-off, slide or trill.
-fn next_on_string(bar: &Bar, from: usize, string: u8) -> Option<usize> {
-    bar.events
-        .iter()
-        .enumerate()
-        .skip(from + 1)
-        .find(|(_, e)| e.notes.iter().any(|n| n.string == string))
-        .map(|(i, _)| i)
-}
-
 /// What is printed on the string line for this note.
 fn fret_label(note: &Note) -> String {
     match note.tech {
@@ -352,7 +341,7 @@ fn technique(
     let right = x + w * 0.5 + sc(0.5);
     // Where the partner note sits, for the techniques that join two notes.
     let partner = |out_fret: &mut Option<u8>| -> Option<f32> {
-        let j = next_on_string(bar, ei, note.string)?;
+        let j = bar.next_on_string(ei, note.string)?;
         *out_fret = bar.events[j]
             .notes
             .iter()

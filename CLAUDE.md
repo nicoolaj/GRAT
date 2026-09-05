@@ -48,7 +48,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs, strum row, rhythm stems |
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, hit boxes |
 | `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette |
-| `live.rs` | the live player: transport, the two scrolling views, the highlighter, the metronome (click + flash + count-in), and the piece's own sound (one decaying tone per note) crossfaded against the click. A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. Both the click and the note synthesis are macOS/Windows only — see "Verified API facts" |
+| `live.rs` | the live player: transport, the two scrolling views, the highlighter, the metronome (click + flash + count-in), and the piece's own sound (one decaying tone per note, its pitch a piecewise-linear programme so a bend, a slide and a trill glide or alternate instead of sounding flat) crossfaded against the click. A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. Both the click and the note synthesis are macOS/Windows only — see "Verified API facts" |
 | `pdf.rs` | `Prim` → printpdf ops |
 | `main.rs` | window, theme, menus, dialogs, shortcuts, launch splash, `--export` CLI |
 
@@ -161,6 +161,16 @@ never know about pages, egui or PDF.
   just sums whatever is currently playing — there is no gain-staging — which is why a chord's
   several simultaneous strings need a low per-note base gain rather than each playing at full
   amplitude.
+- **rodio 0.22's `Chirp` (`source::chirp`) cannot play a bend, a slide or a trill's pitch sweep** —
+  verified against the vendored source (`source/chirp.rs`): it is sine-only (`t.sin()`,
+  `chirp.rs:76`), where every note this player synthesises is a triangle, and it computes phase as
+  `frequency(t) × t` instead of integrating the frequency ramp over elapsed time — so a sweep asked
+  to end at `f₁` actually ends at `2·f₁ − f₀`, wide enough that a semitone bend would sound a whole
+  tone. `live.rs`'s own `click::Voice` replaces it: a `Source` that reads its frequency off a
+  caller-supplied piecewise-linear `(fraction of the note, Hz)` programme and integrates phase
+  itself, sample by sample, with continuous phase across the whole note so a pitch change never
+  clicks. Every technique that is not one flat pitch — `Bend`, `BendRelease`, `PreBend`, `Slide`,
+  `SlideShift`, `SlideIn`, `Trill` — is just a different breakpoint list fed to the same oscillator.
 
 ## Recipes
 
