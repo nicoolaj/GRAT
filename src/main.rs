@@ -565,29 +565,33 @@ impl TablaturesApp {
                     // Twenty of them is more than most players ever want, and the
                     // ones left out give the palette its room back.
                     ui.menu_button(t("menu.note_styles"), |ui| {
-                        let mut kind = "";
-                        for (i, (tech, key, group)) in TECH_LEGEND.iter().enumerate() {
-                            if *group != kind {
-                                if !kind.is_empty() {
-                                    ui.separator();
-                                }
-                                ui.label(t(group));
-                                kind = group;
-                            }
-                            let bit = 1u32 << i;
-                            let mut on = self.editor.tech_shown & bit != 0;
-                            let label = egui::RichText::new(t(key))
-                                .color(canvas::rgb(technique_color(tech)));
-                            if ui.checkbox(&mut on, label).changed() {
-                                self.editor.tech_shown ^= bit;
-                                // Hiding the armed technique would leave a tool
-                                // selected with no button to show for it.
-                                if !on
-                                    && std::mem::discriminant(&self.editor.tool_tech)
-                                        == std::mem::discriminant(tech)
-                                {
-                                    self.editor.tool_tech = Technique::Plain;
-                                }
+                        let mut last_kind = "";
+                        for (_tech, _key, group) in TECH_LEGEND.iter() {
+                            if *group != last_kind {
+                                ui.menu_button(t(group), |ui| {
+                                    // Emit all techniques in this category.
+                                    for (j, (tech2, key2, group2)) in TECH_LEGEND.iter().enumerate() {
+                                        if *group2 != *group {
+                                            continue;
+                                        }
+                                        let bit = 1u32 << j;
+                                        let mut on = self.editor.tech_shown & bit != 0;
+                                        let label = egui::RichText::new(t(key2))
+                                            .color(canvas::rgb(technique_color(tech2)));
+                                        if ui.checkbox(&mut on, label).changed() {
+                                            self.editor.tech_shown ^= bit;
+                                            // Hiding the armed technique would leave a tool
+                                            // selected with no button to show for it.
+                                            if !on
+                                                && std::mem::discriminant(&self.editor.tool_tech)
+                                                    == std::mem::discriminant(tech2)
+                                            {
+                                                self.editor.tool_tech = Technique::Plain;
+                                            }
+                                        }
+                                    }
+                                });
+                                last_kind = group;
                             }
                         }
                     });

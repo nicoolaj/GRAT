@@ -1,0 +1,614 @@
+{
+  "format_version": 2,
+  "title": "Don't Stop 'Til You Get Enough",
+  "author": "Michael Jackson",
+  "tempo": 102,
+  "model": "TwoLine",
+  "staff_order": "NotationFirst",
+  "bars": [
+    {
+      "events": [
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 480
+        },
+        {
+          "dur": 480,
+          "notes": [
+            {
+              "string": 5,
+              "fret": 3
+            }
+          ]
+        }
+      ],
+      "time_sig": [
+        4,
+        4
+      ]
+    },
+    {
+      "events": [
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 480
+        },
+        {
+          "dur": 480,
+          "notes": [
+            {
+              "string": 5,
+              "fret": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "events": [
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 480
+        },
+        {
+          "dur": 480,
+          "notes": [
+            {
+              "string": 5,
+              "fret": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "events": [
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 480
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 5,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 120,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 0
+            }
+          ]
+        },
+        {
+          "dur": 120,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "events": [
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 480
+        },
+        {
+          "dur": 480,
+          "notes": [
+            {
+              "string": 5,
+              "fret": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "events": [
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 2,
+              "fret": 5
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 2,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 2,
+              "fret": 0
+            }
+          ]
+        },
+        {
+          "dur": 480,
+          "notes": [
+            {
+              "string": 5,
+              "fret": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "events": [
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 480
+        },
+        {
+          "dur": 480,
+          "notes": [
+            {
+              "string": 5,
+              "fret": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "events": [
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3,
+              "tie_next": true
+            }
+          ]
+        },
+        {
+          "dur": 720,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 240,
+          "notes": [
+            {
+              "string": 4,
+              "fret": 3
+            }
+          ]
+        },
+        {
+          "dur": 960
+        }
+      ]
+    }
+  ]
+}
