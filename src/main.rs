@@ -29,6 +29,12 @@ const SHORTCUT_QUIT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
 const SHORTCUT_UNDO: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
+const SHORTCUT_COPY: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
+const SHORTCUT_CUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::X);
+const SHORTCUT_PASTE: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::V);
 const SHORTCUT_LIVE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::L);
 
@@ -536,6 +542,46 @@ impl TablaturesApp {
                 });
 
                 ui.menu_button(t("menu.edit"), |ui| {
+                    let sc_copy = ui.ctx().format_shortcut(&SHORTCUT_COPY);
+                    let sc_cut = ui.ctx().format_shortcut(&SHORTCUT_CUT);
+                    let sc_paste = ui.ctx().format_shortcut(&SHORTCUT_PASTE);
+                    let has_sel = self.editor.selected.is_some();
+                    let has_clip = !self.editor.clipboard.is_empty();
+                    if ui
+                        .add_enabled(
+                            has_sel,
+                            egui::Button::new(t("menu.copy")).shortcut_text(sc_copy),
+                        )
+                        .clicked()
+                    {
+                        canvas::copy(&mut self.editor, &self.doc);
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            has_sel,
+                            egui::Button::new(t("menu.cut")).shortcut_text(sc_cut),
+                        )
+                        .clicked()
+                    {
+                        if canvas::cut(&mut self.editor, &mut self.doc) {
+                            self.dirty = true;
+                        }
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            has_sel && has_clip,
+                            egui::Button::new(t("menu.paste")).shortcut_text(sc_paste),
+                        )
+                        .clicked()
+                    {
+                        if canvas::paste(&mut self.editor, &mut self.doc) {
+                            self.dirty = true;
+                        }
+                        ui.close();
+                    }
+                    ui.separator();
                     // Input mode: whether an explicit duration change pushes the
                     // rest of the piece forward or absorbs locally. The status
                     // bar's "INS" light reflects this.
@@ -570,7 +616,8 @@ impl TablaturesApp {
                             if *group != last_kind {
                                 ui.menu_button(t(group), |ui| {
                                     // Emit all techniques in this category.
-                                    for (j, (tech2, key2, group2)) in TECH_LEGEND.iter().enumerate() {
+                                    for (j, (tech2, key2, group2)) in TECH_LEGEND.iter().enumerate()
+                                    {
                                         if *group2 != *group {
                                             continue;
                                         }
@@ -818,6 +865,19 @@ impl eframe::App for TablaturesApp {
         {
             self.dirty = true;
         }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_COPY)) {
+            canvas::copy(&mut self.editor, &self.doc);
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_CUT))
+            && canvas::cut(&mut self.editor, &mut self.doc)
+        {
+            self.dirty = true;
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_PASTE))
+            && canvas::paste(&mut self.editor, &mut self.doc)
+        {
+            self.dirty = true;
+        }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_LIVE)) {
             if self.live.open {
                 self.live.exit();
@@ -944,6 +1004,9 @@ impl eframe::App for TablaturesApp {
                     ("menu.save_as", &SHORTCUT_SAVE_AS),
                     ("menu.export_pdf", &SHORTCUT_EXPORT),
                     ("tool.undo", &SHORTCUT_UNDO),
+                    ("menu.copy", &SHORTCUT_COPY),
+                    ("menu.cut", &SHORTCUT_CUT),
+                    ("menu.paste", &SHORTCUT_PASTE),
                     ("menu.live", &SHORTCUT_LIVE),
                     ("menu.quit", &SHORTCUT_QUIT),
                 ] {
@@ -958,6 +1021,7 @@ impl eframe::App for TablaturesApp {
                     "help.key_backspace",
                     "help.key_space",
                     "help.key_arrows",
+                    "help.key_range_select",
                     "help.key_duration",
                     "help.key_zoom",
                     "help.key_live",

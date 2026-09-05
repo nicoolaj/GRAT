@@ -30,6 +30,12 @@ pub struct Sel {
 pub struct EditorState {
     pub zoom: f32,
     pub selected: Option<Sel>,
+    /// The other end of a multi-event selection, set by a Shift-click or Shift-arrow
+    /// and cleared by any plain click or arrow move. `None` means `selected` is a
+    /// single cell, as it always was before copy/paste existed.
+    pub range_anchor: Option<Sel>,
+    /// Copied/cut events, in document order. Session-only, like `undo_stack`.
+    pub clipboard: Vec<model::Event>,
     /// Technique applied to the selected note when clicked, or armed for the next
     /// note placed.
     pub tool_tech: Technique,
@@ -69,6 +75,8 @@ impl Default for EditorState {
         EditorState {
             zoom: 3.5,
             selected: None,
+            range_anchor: None,
+            clipboard: Vec::new(),
             tool_tech: Technique::Plain,
             tool_value: model::Dur {
                 base: NoteValue::Quarter,
@@ -349,6 +357,129 @@ fn set_sel(state: &mut EditorState, sel: Option<Sel>) {
     state.selected = sel;
 }
 
+/// Like `extend_selection`, but for the Shift-arrow path: `move_selection` already
+/// knows how to step `selected`, so this only has to plant the anchor first.
+fn ensure_anchor(state: &mut EditorState) {
+    if state.range_anchor.is_none() {
+        state.range_anchor = state.selected;
+    }
+}
+
+/// Extend the selection from the current cell to `sel` (a Shift-click). Plants the
+/// anchor on the first extension, then just moves the live end.
+fn extend_selection(state: &mut EditorState, sel: Option<Sel>) {
+    let Some(sel) = sel else { return };
+    ensure_anchor(state);
+    set_sel(state, Some(sel));
+}
+
+/// Every `(bar, event)` pair in the document, in reading order -- the same order
+/// `next_cell`/`prev_cell` walk by hand. Backs both the range highlight and the
+/// paste cursor, which both need to step across bar boundaries.
+fn flat_positions(doc: &Document) -> Vec<(usize, usize)> {
+    doc.bars
+        .iter()
+        .enumerate()
+        .flat_map(|(b, bar)| (0..bar.events.len()).map(move |e| (b, e)))
+        .collect()
+}
+
+/// The `(bar, event)` span from `a` to `b`, in document order regardless of which
+/// came first or which string either carries -- copy/cut/paste work on whole events.
+fn event_span(a: Sel, b: Sel) -> ((usize, usize), (usize, usize)) {
+    let ka = (a.bar, a.event);
+    let kb = (b.bar, b.event);
+    if ka <= kb {
+        (ka, kb)
+    } else {
+        (kb, ka)
+    }
+}
+
+/// Copy the selected event, or the whole range when `range_anchor` is set, into the
+/// clipboard. Returns whether there was anything to copy.
+pub fn copy(state: &mut EditorState, doc: &Document) -> bool {
+    let Some(sel) = state.selected else {
+        return false;
+    };
+    let anchor = state.range_anchor.unwrap_or(sel);
+    let (lo, hi) = event_span(anchor, sel);
+    let positions = flat_positions(doc);
+    let (Some(i0), Some(i1)) = (
+        positions.iter().position(|&p| p == lo),
+        positions.iter().position(|&p| p == hi),
+    ) else {
+        return false;
+    };
+    state.clipboard = positions[i0..=i1]
+        .iter()
+        .filter_map(|&(b, e)| doc.bars.get(b)?.events.get(e).cloned())
+        .collect();
+    !state.clipboard.is_empty()
+}
+
+/// Copy the selection, then clear the notes of every event in it -- what Space
+/// already does to one cell, extended to the whole range.
+pub fn cut(state: &mut EditorState, doc: &mut Document) -> bool {
+    if !copy(state, doc) {
+        return false;
+    }
+    let sel = state.selected.expect("copy() returned true");
+    let anchor = state.range_anchor.unwrap_or(sel);
+    let (lo, hi) = event_span(anchor, sel);
+    mutate(state, doc, move |doc| {
+        let positions = flat_positions(doc);
+        let (Some(i0), Some(i1)) = (
+            positions.iter().position(|&p| p == lo),
+            positions.iter().position(|&p| p == hi),
+        ) else {
+            return;
+        };
+        for &(b, e) in &positions[i0..=i1] {
+            if let Some(event) = doc.bars.get_mut(b).and_then(|bar| bar.events.get_mut(e)) {
+                event.notes.clear();
+            }
+        }
+    });
+    true
+}
+
+/// Paste the clipboard starting at the selected cell, overwriting one event per
+/// clipboard entry in document order. Stops at the end of the document rather than
+/// inserting, so no bar's total duration ever changes.
+///
+/// ponytail: techniques that find their partner by position in the bar (slide,
+/// hammer-on/pull-off, trill -- via `Bar::next_on_string`) are copied as-is; at the
+/// new position their partner can change or vanish. Reproducing the technique glyph
+/// is the goal here, not re-deriving its partner -- upgrade path is a second pass
+/// that re-links partners after paste, if that ever bites in practice.
+pub fn paste(state: &mut EditorState, doc: &mut Document) -> bool {
+    if state.clipboard.is_empty() {
+        return false;
+    }
+    let Some(sel) = state.selected else {
+        return false;
+    };
+    let clip = state.clipboard.clone();
+    let mut pasted = false;
+    mutate(state, doc, |doc| {
+        let positions = flat_positions(doc);
+        let Some(start) = positions.iter().position(|&p| p == (sel.bar, sel.event)) else {
+            return;
+        };
+        for (i, ev) in clip.into_iter().enumerate() {
+            let Some(&(b, e)) = positions.get(start + i) else {
+                break;
+            };
+            if let Some(event) = doc.bars.get_mut(b).and_then(|bar| bar.events.get_mut(e)) {
+                *event = ev;
+                pasted = true;
+            }
+        }
+    });
+    pasted
+}
+
 fn move_selection(state: &mut EditorState, doc: &Document, key: egui::Key) {
     let Some(sel) = state.selected else { return };
     let next = match key {
@@ -617,6 +748,38 @@ pub fn show(
                     );
                 }
             }
+            // A multi-event selection: every cell (all 6 strings) between the anchor
+            // and the live end, lightly shaded -- the live end itself is redrawn
+            // below at full strength. Linear scan through `find_hit` per cell, same
+            // as `find_hit` already does per frame: cheap next to actually
+            // rendering the page.
+            if let (Some(anchor), Some(sel)) = (state.range_anchor, state.selected) {
+                let (lo, hi) = event_span(anchor, sel);
+                for &(b, e) in &flat_positions(doc) {
+                    if (b, e) < lo || (b, e) > hi {
+                        continue;
+                    }
+                    for string in 0..6u8 {
+                        if let Some((index, hit)) = find_hit(
+                            pages,
+                            Sel {
+                                bar: b,
+                                event: e,
+                                string,
+                            },
+                        ) {
+                            draw_highlight(
+                                &painter,
+                                content_min,
+                                state.zoom,
+                                index,
+                                hit,
+                                ACCENT.gamma_multiply(0.3),
+                            );
+                        }
+                    }
+                }
+            }
             if let Some(sel) = state.selected {
                 if let Some((index, hit)) = find_hit(pages, sel) {
                     let rect = draw_highlight(
@@ -638,7 +801,12 @@ pub fn show(
                 response.request_focus();
                 if let Some(p) = response.interact_pointer_pos() {
                     let sel = pick(pages, content_min, state.zoom, p);
-                    set_sel(state, sel);
+                    if ui.input(|i| i.modifiers.shift) {
+                        extend_selection(state, sel);
+                    } else {
+                        state.range_anchor = None;
+                        set_sel(state, sel);
+                    }
                 }
             }
 
@@ -751,7 +919,10 @@ pub fn show(
                             }
                         }
                         egui::Event::Key {
-                            key, pressed: true, ..
+                            key,
+                            pressed: true,
+                            modifiers,
+                            ..
                         } if matches!(
                             key,
                             egui::Key::ArrowUp
@@ -760,6 +931,11 @@ pub fn show(
                                 | egui::Key::ArrowRight
                         ) =>
                         {
+                            if modifiers.shift {
+                                ensure_anchor(state);
+                            } else {
+                                state.range_anchor = None;
+                            }
                             move_selection(state, doc, key);
                         }
                         egui::Event::Key {
@@ -1471,6 +1647,173 @@ mod tests {
             step_value(NoteValue::ThirtySecond, true),
             NoteValue::ThirtySecond,
             "shorter than ThirtySecond clamps instead of wrapping"
+        );
+    }
+
+    #[test]
+    fn extend_selection_plants_anchor_once() {
+        let mut state = EditorState {
+            selected: Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 0,
+            }),
+            ..Default::default()
+        };
+        extend_selection(
+            &mut state,
+            Some(Sel {
+                bar: 0,
+                event: 2,
+                string: 0,
+            }),
+        );
+        assert_eq!(
+            state.range_anchor,
+            Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 0
+            })
+        );
+
+        extend_selection(
+            &mut state,
+            Some(Sel {
+                bar: 1,
+                event: 1,
+                string: 0,
+            }),
+        );
+        assert_eq!(
+            state.range_anchor,
+            Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 0
+            }),
+            "anchor stays put on a second extension"
+        );
+        assert_eq!(
+            state.selected,
+            Some(Sel {
+                bar: 1,
+                event: 1,
+                string: 0
+            })
+        );
+    }
+
+    #[test]
+    fn copy_then_paste_a_range_of_events() {
+        let mut doc = Document::new_empty();
+        doc.bars[0].events[0].notes.push(model::Note {
+            string: 0,
+            fret: 3,
+            tech: Technique::Plain,
+            tie_next: false,
+        });
+        doc.bars[0].events[1].notes.push(model::Note {
+            string: 1,
+            fret: 5,
+            tech: Technique::Plain,
+            tie_next: false,
+        });
+        let mut state = EditorState {
+            selected: Some(Sel {
+                bar: 0,
+                event: 1,
+                string: 0,
+            }),
+            range_anchor: Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 0,
+            }),
+            ..Default::default()
+        };
+        assert!(copy(&mut state, &doc));
+        assert_eq!(state.clipboard.len(), 2);
+
+        state.range_anchor = None;
+        state.selected = Some(Sel {
+            bar: 1,
+            event: 0,
+            string: 0,
+        });
+        assert!(paste(&mut state, &mut doc));
+
+        assert_eq!(doc.bars[1].events[0].notes[0].fret, 3);
+        assert_eq!(doc.bars[1].events[1].notes[0].fret, 5);
+        assert_eq!(doc.bars[1].events[1].notes[0].string, 1);
+    }
+
+    #[test]
+    fn cut_clears_notes_across_the_range() {
+        let mut doc = Document::new_empty();
+        doc.bars[0].events[0].notes.push(model::Note {
+            string: 0,
+            fret: 3,
+            tech: Technique::Plain,
+            tie_next: false,
+        });
+        doc.bars[0].events[1].notes.push(model::Note {
+            string: 1,
+            fret: 5,
+            tech: Technique::Plain,
+            tie_next: false,
+        });
+        let mut state = EditorState {
+            selected: Some(Sel {
+                bar: 0,
+                event: 1,
+                string: 0,
+            }),
+            range_anchor: Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 0,
+            }),
+            ..Default::default()
+        };
+        assert!(cut(&mut state, &mut doc));
+        assert_eq!(state.clipboard.len(), 2);
+        assert_eq!(state.clipboard[0].notes[0].fret, 3);
+        assert!(doc.bars[0].events[0].is_rest());
+        assert!(doc.bars[0].events[1].is_rest());
+    }
+
+    #[test]
+    fn paste_near_the_end_of_the_document_truncates() {
+        let mut doc = Document::new_empty(); // 8 bars x 4 quarter rests each
+        let note_event = |fret: u8| model::Event {
+            dur: model::Dur {
+                base: NoteValue::Quarter,
+                dots: 0,
+            },
+            notes: vec![model::Note {
+                string: 0,
+                fret,
+                tech: Technique::Plain,
+                tie_next: false,
+            }],
+            strum: None,
+            palm_mute: false,
+            let_ring: false,
+        };
+        let mut state = EditorState {
+            clipboard: vec![note_event(1), note_event(2), note_event(3)],
+            selected: Some(Sel {
+                bar: 7,
+                event: 3,
+                string: 0,
+            }),
+            ..Default::default()
+        };
+        assert!(paste(&mut state, &mut doc));
+        assert_eq!(
+            doc.bars[7].events[3].notes[0].fret, 1,
+            "only the first clipboard event fit before the document ran out"
         );
     }
 }
