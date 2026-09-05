@@ -107,6 +107,7 @@ const LICENSE_URL: &str = "https://creativecommons.org/licenses/by-nc-sa/4.0/";
 /// ponytail: inline const, not i18n -- untranslatable wordplay; revisit only if a
 /// second language ever wants its own set.
 const EXPANSIONS: &[&str] = &[
+    "GRAT Rythmes, Accords, Tablatures",
     "GRAT Rédige les Accords et Tablatures",
     "GRAT Range Arpèges et Tonalités",
     "GRAT Relie les Accords et Tirés",
