@@ -8,6 +8,8 @@
 //! ponytail: geometric glyphs; embedding a SMuFL font (Bravura) would give finer
 //! shapes at the cost of a ~500 KB asset and font subsetting on the PDF side.
 
+use std::ops::Range;
+
 use crate::engrave::{beam_groups, beam_runs, BeamGroup, Spacing};
 use crate::model::{technique_color, Document, Event, NoteValue, Technique};
 use crate::staff::{barline, ellipse, pt_for_cap, rest, Barline, INK, PAPER};
@@ -16,9 +18,47 @@ use crate::{Align, Prim, Rgb, P};
 /// Distance between two staff lines, in millimetres.
 pub const SPACE_MM: f32 = 2.5;
 /// Vertical room the notation row needs: the staff plus the usual ledger territory.
+/// This is the floor `row_extent` never shrinks below, not the room a system with
+/// tall ledger lines actually gets.
 pub const ROW_MM: f32 = 20.0;
 /// Where the bottom staff line sits inside that row.
 pub const BASELINE_OFFSET_MM: f32 = 7.0;
+
+/// Breathing room kept beyond the highest/lowest note's ledger line. Chosen so
+/// `row_extent` reproduces `ROW_MM`/`BASELINE_OFFSET_MM` exactly for a system that
+/// never leaves the staff (half_range == (0, 8)): `8 * 0.5 * SPACE_MM + 3.0 == 13.0`.
+const LEDGER_BREATH_MM: f32 = 3.0;
+
+/// Highest and lowest half-space (see [`staff_position`]) any note in `bars`
+/// reaches, floored to the plain staff `(0, 8)` so a system with no notes — or an
+/// out-of-range index — still returns today's shape.
+pub fn half_range(doc: &Document, bars: Range<usize>) -> (i32, i32) {
+    let mut lo = 0;
+    let mut hi = 8;
+    if let Some(slice) = doc.bars.get(bars) {
+        for bar in slice {
+            for event in &bar.events {
+                for note in &event.notes {
+                    let (half, _) = staff_position(doc.pitch(note));
+                    lo = lo.min(half);
+                    hi = hi.max(half);
+                }
+            }
+        }
+    }
+    (lo, hi)
+}
+
+/// Room the notation row needs above/below its origin (the bottom staff line) to
+/// clear every note and its ledger lines in `half_range`, never less than the
+/// plain-staff default. Grows a system with a high or low run; leaves an ordinary
+/// system exactly as it was.
+pub fn row_extent(half_range: (i32, i32)) -> (f32, f32) {
+    let (lo, hi) = half_range;
+    let above = (hi as f32 * 0.5 * SPACE_MM + LEDGER_BREATH_MM).max(ROW_MM - BASELINE_OFFSET_MM);
+    let below = ((-lo).max(0) as f32 * 0.5 * SPACE_MM + LEDGER_BREATH_MM).max(BASELINE_OFFSET_MM);
+    (above, below)
+}
 
 // Geometry, in multiples of the staff space.
 const LINE_W: f32 = 0.09;

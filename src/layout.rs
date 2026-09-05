@@ -85,32 +85,50 @@ pub fn paginate(doc: &Document) -> Vec<Page> {
         .map(|r| engrave::system_spacing(doc, r.clone(), None).width)
         .collect();
     let scale = justification_scale(&naturals, music_width);
-    let systems: Vec<(Range<usize>, f32)> = systems
+
+    // Each system's own height, from exactly the bars line-breaking gave it — a
+    // line with a high or low run reserves more room than an ordinary one right
+    // next to it on the same page.
+    let systems: Vec<(Range<usize>, f32, f32)> = systems
         .into_iter()
         .zip(naturals.iter().map(|n| n * scale))
+        .map(|(r, w)| {
+            let h = block_height(doc, r.clone());
+            (r, w, h)
+        })
         .collect();
 
-    let block_h = block_height(doc);
-    let capacity = |content_top: f32| -> usize {
-        let content_height = content_top - MARGIN_MM;
-        (((content_height + BLOCK_GAP_MM) / (block_h + BLOCK_GAP_MM)).floor()).max(1.0) as usize
+    // How many leading systems fit in `avail` mm, always at least one — a lone
+    // over-tall system still gets its own page rather than looping forever.
+    let fit_count = |avail: f32, items: &[(Range<usize>, f32, f32)]| -> usize {
+        let mut used = 0.0;
+        let mut n = 0;
+        for (i, (_, _, h)) in items.iter().enumerate() {
+            let add = h + if i == 0 { 0.0 } else { BLOCK_GAP_MM };
+            if n > 0 && used + add > avail {
+                break;
+            }
+            used += add;
+            n += 1;
+        }
+        n.max(1)
     };
-    let cap_first = capacity(PAGE_H_MM - MARGIN_MM - TITLE_BLOCK_MM);
-    let cap_rest = capacity(PAGE_H_MM - MARGIN_MM);
+    let avail_first = PAGE_H_MM - 2.0 * MARGIN_MM - TITLE_BLOCK_MM;
+    let avail_rest = PAGE_H_MM - 2.0 * MARGIN_MM;
 
-    let mut chunks: Vec<&[(Range<usize>, f32)]> = Vec::new();
+    let mut chunks: Vec<&[(Range<usize>, f32, f32)]> = Vec::new();
     if systems.is_empty() {
         // Still one page, furniture only — never zero pages.
         chunks.push(&[]);
     } else {
         let mut idx = 0;
         while idx < systems.len() {
-            let cap = if chunks.is_empty() {
-                cap_first
+            let avail = if chunks.is_empty() {
+                avail_first
             } else {
-                cap_rest
+                avail_rest
             };
-            let take = cap.min(systems.len() - idx).max(1);
+            let take = fit_count(avail, &systems[idx..]);
             chunks.push(&systems[idx..idx + take]);
             idx += take;
         }
@@ -120,7 +138,7 @@ pub fn paginate(doc: &Document) -> Vec<Page> {
     chunks
         .into_iter()
         .enumerate()
-        .map(|(i, sys)| render_page(doc, sys, i + 1, total, block_h))
+        .map(|(i, sys)| render_page(doc, sys, i + 1, total))
         .collect()
 }
 
@@ -159,7 +177,7 @@ impl Strip {
 
 /// Lay `doc` out as a single [`Strip`].
 pub fn strip(doc: &Document) -> Strip {
-    let height = block_height(doc);
+    let height = block_height(doc, 0..doc.bars.len());
     let spacing = engrave::system_spacing(doc, 0..doc.bars.len(), None);
     let mut prims = Vec::new();
     let mut hits = Vec::new();
@@ -233,10 +251,9 @@ pub fn ensure_trailing_blank_system(doc: &mut Document) {
 
 fn render_page(
     doc: &Document,
-    systems: &[(Range<usize>, f32)],
+    systems: &[(Range<usize>, f32, f32)],
     page_no: usize,
     total: usize,
-    block_h: f32,
 ) -> Page {
     let mut prims = Vec::new();
     let mut hits = Vec::new();
@@ -250,7 +267,7 @@ fn render_page(
         running_header(doc, &mut prims);
     }
 
-    for (range, target) in systems {
+    for (range, target, block_h) in systems {
         let spacing = engrave::system_spacing(doc, range.clone(), Some(*target));
         place_block(doc, &spacing, left_x, top, &mut prims, &mut hits);
         top -= block_h + BLOCK_GAP_MM;
@@ -330,7 +347,10 @@ fn row_kinds(model: BlockModel) -> Vec<RowKind> {
 /// `tablature::render_strum` and `notation::render` exactly, so the block-height
 /// used for pagination and the per-row origins used for rendering can never drift
 /// apart: both are computed from this one function.
-fn row_extent(kind: RowKind, show_rhythm: bool) -> (f32, f32) {
+///
+/// `half_range` is the notation row's actual pitch extent for this system (see
+/// [`notation::half_range`]); the other rows ignore it.
+fn row_extent(kind: RowKind, show_rhythm: bool, half_range: (i32, i32)) -> (f32, f32) {
     match kind {
         RowKind::Tab => (
             tablature::STAFF_MM + tablature::BAND_MM,
@@ -341,19 +361,21 @@ fn row_extent(kind: RowKind, show_rhythm: bool) -> (f32, f32) {
             },
         ),
         RowKind::Strum => (tablature::STRUM_MM, 0.0),
-        RowKind::Notation => (
-            notation::ROW_MM - notation::BASELINE_OFFSET_MM,
-            notation::BASELINE_OFFSET_MM,
-        ),
+        RowKind::Notation => notation::row_extent(half_range),
     }
 }
 
-fn block_height(doc: &Document) -> f32 {
+/// Total height of one system's block, given the bars it actually holds — the
+/// notation row's share grows with how high/low those bars' notes go (see
+/// [`notation::half_range`]), so this must be recomputed per system rather than
+/// once for the whole document.
+fn block_height(doc: &Document, bars: Range<usize>) -> f32 {
     let show_rhythm = tablature::shows_rhythm(doc);
+    let half_range = notation::half_range(doc, bars);
     row_kinds(doc.model)
         .iter()
         .map(|&k| {
-            let (above, below) = row_extent(k, show_rhythm);
+            let (above, below) = row_extent(k, show_rhythm, half_range);
             above + below
         })
         .sum()
@@ -373,6 +395,10 @@ fn place_block(
     hits: &mut Vec<tablature::Hit>,
 ) {
     let show_rhythm = tablature::shows_rhythm(doc);
+    let half_range = match (spacing.bars.first(), spacing.bars.last()) {
+        (Some(first), Some(last)) => notation::half_range(doc, first.index..last.index + 1),
+        _ => (0, 8),
+    };
     let mut order = row_kinds(doc.model);
     if matches!(doc.staff_order, StaffOrder::NotationFirst) {
         order.reverse();
@@ -381,7 +407,7 @@ fn place_block(
     let mut cursor = top;
     let mut tab_origin_y = None;
     for kind in order {
-        let (above, below) = row_extent(kind, show_rhythm);
+        let (above, below) = row_extent(kind, show_rhythm, half_range);
         let origin_y = cursor - above;
         cursor = origin_y - below;
         let origin = P::new(x, origin_y);

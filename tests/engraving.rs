@@ -7,6 +7,7 @@ use grat::engrave::{
     timeline, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
 };
 use grat::model::*;
+use grat::notation;
 
 fn note(fret: u8) -> Note {
     Note {
@@ -753,4 +754,48 @@ fn bar_duration_matches_a_bars_worth_of_metronome_beats() {
     assert!((bar_duration_secs((3, 4), 120) - 1.5).abs() < 1e-4);
     // 6/8 at 120 is two dotted-quarter beats, same 0.75s each as above.
     assert!((bar_duration_secs((6, 8), 120) - 1.5).abs() < 1e-4);
+}
+
+#[test]
+fn row_extent_matches_todays_constants_for_a_bar_that_stays_on_the_staff() {
+    let doc = doc_with(Bar {
+        events: vec![ev(NoteValue::Quarter, vec![note(5)])],
+        ..Default::default()
+    });
+    let half_range = notation::half_range(&doc, 0..1);
+    assert_eq!(
+        half_range,
+        (0, 8),
+        "a plain bar never leaves the staff floor"
+    );
+
+    let (above, below) = notation::row_extent(half_range);
+    assert_eq!(above, notation::ROW_MM - notation::BASELINE_OFFSET_MM);
+    assert_eq!(below, notation::BASELINE_OFFSET_MM);
+}
+
+#[test]
+fn row_extent_grows_above_the_staff_for_a_high_run_but_not_below() {
+    let high = Note {
+        string: 0,
+        fret: 20,
+        tech: Technique::Plain,
+        tie_next: false,
+    };
+    let doc = doc_with(Bar {
+        events: vec![ev(NoteValue::Quarter, vec![high])],
+        ..Default::default()
+    });
+    let half_range = notation::half_range(&doc, 0..1);
+    let (above, below) = notation::row_extent(half_range);
+
+    assert!(
+        above > notation::ROW_MM - notation::BASELINE_OFFSET_MM,
+        "a note several ledger lines up must grow the gap above the staff, got {above}"
+    );
+    assert_eq!(
+        below,
+        notation::BASELINE_OFFSET_MM,
+        "a note only above the staff must not grow the room below it"
+    );
 }
