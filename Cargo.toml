@@ -1,6 +1,6 @@
 [package]
 name = "grat"
-version = "2.6.0"
+version = "2.6.1"
 edition = "2021"
 authors = ["Nicolas Jalibert <nicoolaj@gmail.com>"]
 description = "Six-string guitar tablature editor: place notes by mouse, print an A4 PDF"
