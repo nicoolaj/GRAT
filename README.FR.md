@@ -21,6 +21,8 @@ make test     # cargo test
 
 Voir `make help` pour la liste complète des cibles.
 
+Binaires précompilés (macOS, Windows, Linux — amd64 et arm64) : [Releases](https://github.com/nicoolaj/GRAT/releases).
+
 ## Les trois modèles de bloc
 
 Un document choisit, globalement ou par réglage, entre trois présentations

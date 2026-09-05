@@ -20,6 +20,8 @@ make test     # cargo test
 
 See `make help` for the full list of targets.
 
+Prebuilt binaries (macOS, Windows, Linux — amd64 and arm64): [Releases](https://github.com/nicoolaj/GRAT/releases).
+
 ## The three block models
 
 A document chooses, globally or per setting, between three layouts (`model::BlockModel`):

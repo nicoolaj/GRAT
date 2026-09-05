@@ -1,5 +1,10 @@
 .PHONY: help run build debug app logo-assets examples test fmt lint audit clean check-zigbuild \
-	dist-cross dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64
+	dist-cross dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64 \
+	dist-mac dist-mac-amd64 dist-mac-arm64 dist-all \
+	package package-win-amd64 package-win-arm64 package-linux-amd64 package-linux-arm64 \
+	package-mac-amd64 package-mac-arm64 package-app
+
+VERSION := $(shell grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
 
 help:
 	@echo "GRAT — available targets:"
@@ -9,7 +14,10 @@ help:
 	@echo "  app         bundle dist/GRAT.app (Info.plist + icon + binary) — macOS only"
 	@echo "  logo-assets regenerate image.icns + src/assets/logo.png from logo.svg — macOS only"
 	@echo "  examples    regenerate exemples/*.pdf via --export"
-	@echo "  dist-cross  cross-build Windows + Linux, amd64 + arm64, into dist/<platform>/"
+	@echo "  dist-cross  cross-build Windows + Linux, amd64 + arm64, into dist/<platform>/ — needs zig"
+	@echo "  dist-mac    build macOS amd64 + arm64 into dist/<platform>/ — macOS only, no zig needed"
+	@echo "  dist-all    dist-cross + dist-mac + app, all six platforms — macOS host, needs zig"
+	@echo "  package     archive every dist-all output as dist/grat-v<version>-<platform>.{zip,tar.gz}"
 	@echo "  test        cargo test"
 	@echo "  fmt         cargo fmt"
 	@echo "  lint        cargo clippy --all-targets -- -D warnings"
@@ -36,7 +44,6 @@ app: build
 ifneq ($(shell uname -s),Darwin)
 	$(error make app only builds a macOS .app bundle; run this on macOS)
 endif
-	$(eval VERSION := $(shell grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2))
 	@echo "Bundling dist/GRAT.app..."
 	rm -rf dist/GRAT.app
 	mkdir -p dist/GRAT.app/Contents/MacOS dist/GRAT.app/Contents/Resources
@@ -77,6 +84,8 @@ CROSS_win-amd64   := x86_64-pc-windows-gnu
 CROSS_win-arm64   := aarch64-pc-windows-gnullvm
 CROSS_linux-amd64 := x86_64-unknown-linux-gnu
 CROSS_linux-arm64 := aarch64-unknown-linux-gnu
+CROSS_mac-amd64   := x86_64-apple-darwin
+CROSS_mac-arm64   := aarch64-apple-darwin
 
 dist-cross: dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64
 	@echo "Cross builds ready under dist/"
@@ -91,6 +100,44 @@ dist-win-amd64 dist-win-arm64 dist-linux-amd64 dist-linux-arm64: dist-%: check-z
 	mkdir -p dist/$*
 	cp target/$(CROSS_$*)/release/grat$(if $(findstring win,$*),.exe,) dist/$*/
 	@echo "Built dist/$*/"
+
+# macOS cross-arch: Apple's own toolchain links both Darwin arches natively, so
+# unlike Windows/Linux this needs no zig — just the rustup target installed.
+dist-mac: dist-mac-amd64 dist-mac-arm64
+	@echo "macOS builds ready under dist/"
+
+dist-mac-amd64 dist-mac-arm64: dist-%:
+ifneq ($(shell uname -s),Darwin)
+	$(error dist-mac-% only builds on macOS)
+endif
+	rustup target add $(CROSS_$*)
+	cargo build --release --target $(CROSS_$*)
+	mkdir -p dist/$*
+	cp target/$(CROSS_$*)/release/grat dist/$*/
+	@echo "Built dist/$*/"
+
+# All six platform binaries plus the macOS .app bundle, from one macOS host
+# (zig cross-links Windows/Linux; Apple's own toolchain cross-links macOS).
+dist-all: dist-cross dist-mac app
+	@echo "All platform builds ready under dist/"
+
+# Archives every dist-all output the way a GitHub release expects: one
+# zip per Windows target, one tar.gz per Unix target, one zip for the .app.
+package-win-amd64 package-win-arm64: package-win-%: dist-win-%
+	cd dist/win-$* && zip -q ../grat-v$(VERSION)-win-$*.zip grat.exe
+
+package-linux-amd64 package-linux-arm64: package-linux-%: dist-linux-%
+	tar -C dist/linux-$* -czf dist/grat-v$(VERSION)-linux-$*.tar.gz grat
+
+package-mac-amd64 package-mac-arm64: package-mac-%: dist-mac-%
+	tar -C dist/mac-$* -czf dist/grat-v$(VERSION)-mac-$*.tar.gz grat
+
+package-app: app
+	cd dist && zip -qr grat-v$(VERSION)-macos-app.zip GRAT.app
+
+package: package-win-amd64 package-win-arm64 package-linux-amd64 package-linux-arm64 \
+	package-mac-amd64 package-mac-arm64 package-app
+	@echo "Packaged archives in dist/"
 
 # Regenerates exemples/*.pdf from exemples/*.gtab via the --export CLI -- no window.
 examples: build
