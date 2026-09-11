@@ -130,7 +130,7 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
             color: INK,
         });
     }
-    g_clef(origin.x - HEAD_MM + 1.6, origin.y, sp, out);
+    g_clef(origin.x - HEAD_MM + 3.6, origin.y, sp, out);
 
     // Barlines, and the time signature. A repeat mark between two bars carries the
     // closing repeat of the bar on its left and the opening one of the bar on its
@@ -783,87 +783,106 @@ fn time_signature(x: f32, y0: f32, sp: f32, sig: (u8, u8), out: &mut Vec<Prim>) 
     }
 }
 
-/// A treble clef, traced as a tapered spiral plus the upper hook and the tail.
+/// A treble clef, traced as one continuous stroke: the spiral, the thick upstroke,
+/// the apex loop, the thin stem, the hook. `cx` is the bowl's centre, which sits on
+/// the G line; the table is in staff spaces from that point, y up, each entry
+/// carrying the stroke width there, so the ink swells on the rising curves and
+/// thins on the stem the way an engraved clef does. The centre-line and widths were
+/// measured off a classic engraved clef, with two deliberate departures: the
+/// spiral is extended a quarter turn so it starts with its dot exactly on the G
+/// line (the engraved one ends half a space below it), and the apex is squashed a
+/// tenth so the glyph stays inside the 13 mm the row reserves above its baseline.
 ///
 /// ponytail: a procedural G clef rather than a real glyph outline. It reads
 /// correctly at print size; embed a music font if it ever has to be exact.
-fn g_clef(x: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
-    let g = y0 + 1.0 * sp; // the clef curls around the G line, the second one up
-    let (turns, start, steps) = (2.05_f32, 0.35_f32, 48);
-    let mut prev: Option<P> = None;
-    let mut end = P { x, y: g };
-    for i in 0..=steps {
-        let t = i as f32 / steps as f32;
-        let th = std::f32::consts::TAU * turns * t + start;
-        let r = (0.13 + 0.87 * t * t) * sp;
-        let pt = P {
-            x: x + r * th.cos(),
-            y: g + r * th.sin(),
-        };
-        if let Some(a) = prev {
+fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
+    // (x, y, width): a Catmull-Rom spline runs through the points.
+    const PATH: [[f32; 3]; 41] = [
+        [-0.12, 0.00, 0.10], // the anchor: the spiral starts on the G line
+        [0.12, -0.22, 0.11],
+        [-0.10, -0.48, 0.12],
+        [-0.28, -0.36, 0.15],
+        [-0.37, -0.17, 0.18],
+        [-0.38, 0.02, 0.22],
+        [-0.34, 0.22, 0.27],
+        [-0.22, 0.46, 0.36],
+        [0.05, 0.66, 0.44], // the bowl's top, one thick stroke under the third line
+        [0.48, 0.74, 0.40],
+        [0.86, 0.50, 0.35],
+        [1.06, 0.02, 0.28],
+        [0.95, -0.52, 0.22],
+        [0.50, -0.86, 0.20],
+        [0.00, -0.94, 0.12], // the bottom, thin, on the first line
+        [-0.46, -0.80, 0.10],
+        [-0.82, -0.47, 0.12],
+        [-1.05, 0.00, 0.20],
+        [-1.04, 0.60, 0.35], // the thick left side rising into the upstroke
+        [-0.84, 1.00, 0.42],
+        [-0.51, 1.40, 0.46],
+        [-0.11, 1.80, 0.50], // crosses the stem on the fourth line
+        [0.30, 2.18, 0.45],
+        [0.62, 2.54, 0.37],
+        [0.78, 2.90, 0.25],
+        [0.85, 3.26, 0.15],
+        [0.76, 3.62, 0.30],
+        [0.47, 3.84, 0.45], // the apex
+        [0.18, 3.62, 0.35],
+        [0.06, 3.26, 0.27],
+        [-0.01, 2.90, 0.18],
+        [-0.02, 2.54, 0.12],
+        [0.06, 1.90, 0.13], // the stem, leaning like a pen stroke
+        [0.19, 1.00, 0.13],
+        [0.32, 0.00, 0.13],
+        [0.45, -1.00, 0.13],
+        [0.54, -1.70, 0.14],
+        [0.50, -2.25, 0.16], // the hook
+        [0.22, -2.48, 0.20],
+        [-0.12, -2.44, 0.24],
+        [-0.35, -2.25, 0.30],
+    ];
+    const DOT: [f32; 3] = [-0.12, 0.00, 0.13];
+    const PEARL: [f32; 3] = [-0.43, -2.00, 0.37];
+    const STEPS: usize = 6;
+
+    let g = y0 + sp; // the G line: the second one up, which the spiral curls around
+    let at = |x: f32, y: f32| P {
+        x: cx + x * sp,
+        y: g + y * sp,
+    };
+    let n = PATH.len();
+    let mut prev = (at(PATH[0][0], PATH[0][1]), PATH[0][2]);
+    for i in 0..n - 1 {
+        let (p0, p1, p2, p3) = (
+            PATH[i.saturating_sub(1)],
+            PATH[i],
+            PATH[i + 1],
+            PATH[(i + 2).min(n - 1)],
+        );
+        let c1 = [p1[0] + (p2[0] - p0[0]) / 6.0, p1[1] + (p2[1] - p0[1]) / 6.0];
+        let c2 = [p2[0] - (p3[0] - p1[0]) / 6.0, p2[1] - (p3[1] - p1[1]) / 6.0];
+        // k starts at 1: repeating the segment's start would give epaint a
+        // zero-length line, whose normal is NaN.
+        for k in 1..=STEPS {
+            let t = k as f32 / STEPS as f32;
+            let u = 1.0 - t;
+            let (uu, tt) = (u * u, t * t);
+            let x = uu * u * p1[0] + 3.0 * uu * t * c1[0] + 3.0 * u * tt * c2[0] + tt * t * p2[0];
+            let y = uu * u * p1[1] + 3.0 * uu * t * c1[1] + 3.0 * u * tt * c2[1] + tt * t * p2[1];
+            let w = p1[2] + (p2[2] - p1[2]) * t;
+            let pt = at(x, y);
             out.push(Prim::Line {
-                a,
+                a: prev.0,
                 b: pt,
-                w: (0.10 + 0.22 * t) * sp,
+                w: 0.5 * (prev.1 + w) * sp,
                 color: INK,
             });
+            prev = (pt, w);
         }
-        prev = Some(pt);
-        end = pt;
     }
-    let peak = P {
-        x: x + 0.05 * sp,
-        y: g + 3.8 * sp,
-    };
-    out.push(Prim::Curve {
-        a: end,
-        c1: P {
-            x: end.x - 0.7 * sp,
-            y: g + 1.9 * sp,
-        },
-        c2: P {
-            x: peak.x - 0.75 * sp,
-            y: peak.y - 0.3 * sp,
-        },
-        b: peak,
-        w: 0.3 * sp,
-        color: INK,
-    });
-    out.push(Prim::Curve {
-        a: peak,
-        c1: P {
-            x: peak.x + 0.7 * sp,
-            y: peak.y - 0.5 * sp,
-        },
-        c2: P {
-            x: x + 0.42 * sp,
-            y: g + 1.0 * sp,
-        },
-        b: P {
-            x: x + 0.16 * sp,
-            y: g - 2.1 * sp,
-        },
-        w: 0.3 * sp,
-        color: INK,
-    });
-    out.push(Prim::Curve {
-        a: P {
-            x: x + 0.16 * sp,
-            y: g - 2.1 * sp,
-        },
-        c1: P {
-            x: x + 0.10 * sp,
-            y: g - 2.9 * sp,
-        },
-        c2: P {
-            x: x - 0.60 * sp,
-            y: g - 2.6 * sp,
-        },
-        b: P {
-            x: x - 0.62 * sp,
-            y: g - 1.9 * sp,
-        },
-        w: 0.26 * sp,
-        color: INK,
-    });
+    for [x, y, r] in [DOT, PEARL] {
+        out.push(Prim::Poly {
+            pts: ellipse(at(x, y), r * sp, r * sp, 0.0),
+            color: INK,
+        });
+    }
 }
