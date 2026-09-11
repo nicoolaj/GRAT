@@ -785,73 +785,82 @@ fn time_signature(x: f32, y0: f32, sp: f32, sig: (u8, u8), out: &mut Vec<Prim>) 
 
 /// A treble clef, traced as one continuous stroke: the spiral, the thick upstroke,
 /// the apex loop, the thin stem, the hook. `cx` is the bowl's centre, which sits on
-/// the G line; the table is in staff spaces from that point, y up, each entry
-/// carrying the stroke width there, so the ink swells on the rising curves and
-/// thins on the stem the way an engraved clef does. The centre-line and widths were
-/// measured off a classic engraved clef, with two deliberate departures: the
-/// spiral is extended a quarter turn so it starts with its dot exactly on the G
-/// line (the engraved one ends half a space below it), and the apex is squashed a
-/// tenth so the glyph stays inside the 13 mm the row reserves above its baseline.
+/// the G line; everything is in staff spaces from that point, y up, with the stroke
+/// width carried along so the ink swells on the rising curves and thins on the stem
+/// the way an engraved clef does.
+///
+/// The spiral is geometric: one and a half clockwise turns from a dot on the G
+/// line, its radius `r = R0 + (R - R0)·(2u - u²)` in the fraction `u` of the way
+/// round — opening evenly, then easing to a constant so the last half turn is the
+/// round outer loop and the upstroke leaves it tangentially at the left. The rest
+/// of the glyph is a spline through points measured off a classic engraved clef,
+/// with its apex squashed a tenth so the glyph stays inside the 13 mm the row
+/// reserves above its baseline.
 ///
 /// ponytail: a procedural G clef rather than a real glyph outline. It reads
 /// correctly at print size; embed a music font if it ever has to be exact.
 fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
-    // (x, y, width): a Catmull-Rom spline runs through the points.
-    const PATH: [[f32; 3]; 41] = [
-        [-0.12, 0.00, 0.10], // the anchor: the spiral starts on the G line
-        [0.12, -0.22, 0.11],
-        [-0.10, -0.48, 0.12],
-        [-0.28, -0.36, 0.15],
-        [-0.37, -0.17, 0.18],
-        [-0.38, 0.02, 0.22],
-        [-0.34, 0.22, 0.27],
-        [-0.22, 0.46, 0.36],
-        [0.05, 0.66, 0.44], // the bowl's top, one thick stroke under the third line
-        [0.48, 0.74, 0.40],
-        [0.86, 0.50, 0.35],
-        [1.06, 0.02, 0.28],
-        [0.95, -0.52, 0.22],
-        [0.50, -0.86, 0.20],
-        [0.00, -0.94, 0.12], // the bottom, thin, on the first line
-        [-0.46, -0.80, 0.10],
-        [-0.82, -0.47, 0.12],
-        [-1.05, 0.00, 0.20],
-        [-1.04, 0.60, 0.35], // the thick left side rising into the upstroke
+    const R0: f32 = 0.10;
+    const R: f32 = 1.05;
+    const TURNS: f32 = 1.5;
+    const SQUASH: f32 = 0.93; // the bowl is a touch wider than tall, as engraved
+    const SPIRAL_STEPS: usize = 108;
+    // Stroke width at each quarter turn: thin inside, thick over the top, thin
+    // along the bottom, swelling again where the upstroke takes over.
+    const SPIRAL_W: [f32; 7] = [0.10, 0.12, 0.16, 0.26, 0.24, 0.12, 0.22];
+    // (x, y, width) from the spiral's end: a Catmull-Rom spline runs through them.
+    const PATH: [[f32; 3]; 24] = [
+        [-1.05, 0.00, 0.22],
+        [-1.06, 0.60, 0.35], // the thick left side rising into the upstroke
         [-0.84, 1.00, 0.42],
         [-0.51, 1.40, 0.46],
-        [-0.11, 1.80, 0.50], // crosses the stem on the fourth line
-        [0.30, 2.18, 0.45],
-        [0.62, 2.54, 0.37],
-        [0.78, 2.90, 0.25],
-        [0.85, 3.26, 0.15],
-        [0.76, 3.62, 0.30],
-        [0.47, 3.84, 0.45], // the apex
-        [0.18, 3.62, 0.35],
-        [0.06, 3.26, 0.27],
-        [-0.01, 2.90, 0.18],
-        [-0.02, 2.54, 0.12],
-        [0.06, 1.90, 0.13], // the stem, leaning like a pen stroke
-        [0.19, 1.00, 0.13],
-        [0.32, 0.00, 0.13],
-        [0.45, -1.00, 0.13],
+        [-0.10, 1.80, 0.50], // crosses the stem on the fourth line
+        [0.32, 2.18, 0.45],
+        [0.64, 2.54, 0.37],
+        [0.80, 2.90, 0.25],
+        [0.87, 3.26, 0.15],
+        [0.78, 3.62, 0.30],
+        [0.50, 3.84, 0.45], // the apex
+        [0.22, 3.62, 0.35],
+        [0.12, 3.26, 0.27],
+        [0.07, 2.90, 0.18],
+        [0.08, 2.54, 0.12],
+        [0.16, 1.90, 0.13], // the stem, leaning like a pen stroke
+        [0.27, 1.00, 0.13],
+        [0.38, 0.00, 0.13],
+        [0.47, -1.00, 0.13],
         [0.54, -1.70, 0.14],
         [0.50, -2.25, 0.16], // the hook
         [0.22, -2.48, 0.20],
         [-0.12, -2.44, 0.24],
         [-0.35, -2.25, 0.30],
     ];
-    const DOT: [f32; 3] = [-0.12, 0.00, 0.13];
-    const PEARL: [f32; 3] = [-0.43, -2.00, 0.37];
     const STEPS: usize = 6;
+    const DOT: [f32; 3] = [R0, 0.00, 0.12];
+    const PEARL: [f32; 3] = [-0.43, -2.00, 0.37];
 
     let g = y0 + sp; // the G line: the second one up, which the spiral curls around
     let at = |x: f32, y: f32| P {
         x: cx + x * sp,
         y: g + y * sp,
     };
+    let mut path: Vec<(P, f32)> = Vec::with_capacity(SPIRAL_STEPS + 1 + (PATH.len() - 1) * STEPS);
+
+    for i in 0..=SPIRAL_STEPS {
+        let u = i as f32 / SPIRAL_STEPS as f32;
+        let turns = TURNS * u;
+        let r = R0 + (R - R0) * (2.0 * u - u * u);
+        let phi = std::f32::consts::TAU * turns; // clockwise from three o'clock
+        let q = turns * 4.0;
+        let k = (q as usize).min(SPIRAL_W.len() - 2);
+        let w = SPIRAL_W[k] + (SPIRAL_W[k + 1] - SPIRAL_W[k]) * (q - k as f32);
+        path.push((at(r * phi.cos(), -r * phi.sin() * SQUASH), w));
+    }
+
     let n = PATH.len();
-    let mut prev = (at(PATH[0][0], PATH[0][1]), PATH[0][2]);
     for i in 0..n - 1 {
+        // Clamping the ends makes the first tangent point straight up, which is
+        // exactly how the eased spiral arrives.
         let (p0, p1, p2, p3) = (
             PATH[i.saturating_sub(1)],
             PATH[i],
@@ -860,24 +869,24 @@ fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
         );
         let c1 = [p1[0] + (p2[0] - p0[0]) / 6.0, p1[1] + (p2[1] - p0[1]) / 6.0];
         let c2 = [p2[0] - (p3[0] - p1[0]) / 6.0, p2[1] - (p3[1] - p1[1]) / 6.0];
-        // k starts at 1: repeating the segment's start would give epaint a
-        // zero-length line, whose normal is NaN.
+        // k starts at 1: the segment's start is the previous sample already.
         for k in 1..=STEPS {
             let t = k as f32 / STEPS as f32;
             let u = 1.0 - t;
             let (uu, tt) = (u * u, t * t);
             let x = uu * u * p1[0] + 3.0 * uu * t * c1[0] + 3.0 * u * tt * c2[0] + tt * t * p2[0];
             let y = uu * u * p1[1] + 3.0 * uu * t * c1[1] + 3.0 * u * tt * c2[1] + tt * t * p2[1];
-            let w = p1[2] + (p2[2] - p1[2]) * t;
-            let pt = at(x, y);
-            out.push(Prim::Line {
-                a: prev.0,
-                b: pt,
-                w: 0.5 * (prev.1 + w) * sp,
-                color: INK,
-            });
-            prev = (pt, w);
+            path.push((at(x, y), p1[2] + (p2[2] - p1[2]) * t));
         }
+    }
+
+    for pair in path.windows(2) {
+        out.push(Prim::Line {
+            a: pair[0].0,
+            b: pair[1].0,
+            w: 0.5 * (pair[0].1 + pair[1].1) * sp,
+            color: INK,
+        });
     }
     for [x, y, r] in [DOT, PEARL] {
         out.push(Prim::Poly {
