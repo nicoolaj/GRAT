@@ -237,6 +237,18 @@ pub fn bar_ticks(time_sig: (u8, u8)) -> u32 {
     unit * num as u32
 }
 
+/// Whether `time_sig` is a simple metre of four beats or more -- wide enough
+/// that its own midpoint (half the bar) has to stay visible in print. Never
+/// true for a compound metre (6/8, 9/8, 12/8), which already groups by its
+/// dotted beat and has no such midpoint. Shared by [`beam_span`] (wider
+/// beaming) and `rest_span` (wider rest grouping) -- same threshold, same
+/// reason, applied to two different kinds of run.
+fn has_wide_midpoint(time_sig: (u8, u8)) -> bool {
+    let (num, den) = time_sig;
+    let compound = den >= 8 && num % 3 == 0 && num > 3;
+    !compound && num >= 4
+}
+
 /// Onset of every event in the bar, in ticks from the barline.
 pub fn onsets(bar: &Bar) -> Vec<u32> {
     let mut t = 0;
@@ -699,10 +711,11 @@ fn split_notes_at_beats(bar: &mut Bar, time_sig: (u8, u8)) {
 
 /// Rewrite `bar.events` so runs of consecutive rests read the way a score is
 /// written: a single whole rest for a wholly silent bar, otherwise the rest run
-/// broken at beat boundaries. Notes pass through untouched.
+/// broken at span boundaries, widened past a beat only where that doesn't hide
+/// the bar's midpoint. Notes pass through untouched.
 fn merge_bar_rests(bar: &mut Bar, time_sig: (u8, u8)) {
     let cap = bar_ticks(time_sig);
-    let beat = beat_ticks(time_sig).max(1);
+    let span = rest_span(time_sig);
 
     // A bar that is nothing but rests adding up to a full measure is one whole
     // rest, whatever the metre -- exactly how notation shows an untouched bar.
@@ -728,28 +741,45 @@ fn merge_bar_rests(bar: &mut Bar, time_sig: (u8, u8)) {
             run_start.get_or_insert(t);
         } else {
             if let Some(start) = run_start.take() {
-                emit_rests(start, t, beat, &mut out);
+                emit_rests(start, t, span, &mut out);
             }
             out.push(event.clone());
         }
         t += event.dur.ticks();
     }
     if let Some(start) = run_start.take() {
-        emit_rests(start, t, beat, &mut out);
+        emit_rests(start, t, span, &mut out);
     }
     bar.events = out;
 }
 
-/// Fill `[from, to)` with rests, split at every beat boundary so none straddles a
-/// beat, each beat-aligned piece named by the fewest values `split_ticks` allows.
+/// Ticks over which a run of silence is grouped into one rest -- one beat, or
+/// two in a simple metre of four-plus beats ([`has_wide_midpoint`]). A run that
+/// exactly fills the first or second half of such a bar prints as one half
+/// rest; a run crossing the midpoint (e.g. beats 2-3 of 4/4) still breaks
+/// there, one rest per beat, because that onset is exactly what must stay
+/// visible (Gould, *Behind Bars*). Every other metre (2/4, 3/4, every compound
+/// metre) keeps the one-rest-per-beat grid it already had.
+fn rest_span(time_sig: (u8, u8)) -> u32 {
+    let beat = beat_ticks(time_sig).max(1);
+    if has_wide_midpoint(time_sig) {
+        beat * 2
+    } else {
+        beat
+    }
+}
+
+/// Fill `[from, to)` with rests, split at every `span` boundary so none
+/// straddles one, each span-aligned piece named by the fewest values
+/// `split_ticks` allows. `span` is one beat, or two in a simple metre of
+/// four-plus beats ([`rest_span`]).
 ///
-/// ponytail: a multi-beat run that is not a whole bar comes out as one rest per
-/// beat -- no half / dotted-half grouping. Switch to beat-unit grouping (Gould,
-/// "Behind Bars") if that ever reads as too fussy in print.
-fn emit_rests(from: u32, to: u32, beat: u32, out: &mut Vec<Event>) {
+/// ponytail: still per-beat in 2/4, 3/4 and every compound metre, and never
+/// wider than two beats even in 5/4 or 7/4 -- widen further if a user asks.
+fn emit_rests(from: u32, to: u32, span: u32, out: &mut Vec<Event>) {
     let mut a = from;
     while a < to {
-        let b = ((a / beat + 1) * beat).min(to); // end of a's beat, clamped to `to`
+        let b = ((a / span + 1) * span).min(to); // end of a's span, clamped to `to`
         out.extend(split_ticks(b - a).into_iter().map(|dur| Event {
             dur,
             ..Default::default()
@@ -796,12 +826,10 @@ fn fastest_note(bar: &Bar) -> Option<u32> {
 /// window (conventional enough); widen them here if a user asks.
 fn beam_span(time_sig: (u8, u8), bar: &Bar) -> u32 {
     let beat = beat_ticks(time_sig).max(1);
-    let (num, den) = time_sig;
-    let compound = den >= 8 && num % 3 == 0 && num > 3;
     let shortest = fastest_note(bar).unwrap_or(beat);
     let quaver_is_fastest =
         (NoteValue::Eighth.ticks()..NoteValue::Quarter.ticks()).contains(&shortest);
-    if !compound && num >= 4 && quaver_is_fastest {
+    if has_wide_midpoint(time_sig) && quaver_is_fastest {
         (beat * 2).min(bar_ticks(time_sig).max(beat))
     } else {
         beat

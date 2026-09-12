@@ -757,8 +757,8 @@ fn for_export_merges_sub_beat_rests_without_crossing_a_beat() {
 }
 
 #[test]
-fn for_export_leaves_a_multi_beat_rest_run_as_one_rest_per_beat() {
-    // ponytail ceiling: two silent beats print as two quarter rests, not a half.
+fn for_export_merges_a_beats_3_4_rest_run_into_a_half_rest() {
+    // Beats 3-4 don't cross the bar's midpoint, so they merge into one half rest.
     let mut doc = Document::new_empty();
     doc.bars.truncate(1);
     doc.bars[0].events = vec![
@@ -775,6 +775,71 @@ fn for_export_leaves_a_multi_beat_rest_run_as_one_rest_per_beat() {
             }],
             ..Default::default()
         },
+        beat_rest(NoteValue::Quarter),
+        beat_rest(NoteValue::Quarter),
+    ];
+    let out = engrave::for_export(&doc);
+    let rests: Vec<NoteValue> = out.bars[0]
+        .events
+        .iter()
+        .filter(|e| e.is_rest())
+        .map(|e| e.dur.base)
+        .collect();
+    assert_eq!(rests, vec![NoteValue::Half]);
+}
+
+#[test]
+fn for_export_merges_a_beats_1_2_rest_run_into_a_half_rest() {
+    let mut doc = Document::new_empty();
+    doc.bars.truncate(1);
+    doc.bars[0].events = vec![
+        beat_rest(NoteValue::Quarter),
+        beat_rest(NoteValue::Quarter),
+        q_note(0),
+        q_note(1),
+    ];
+    let out = engrave::for_export(&doc);
+    let rests: Vec<NoteValue> = out.bars[0]
+        .events
+        .iter()
+        .filter(|e| e.is_rest())
+        .map(|e| e.dur.base)
+        .collect();
+    assert_eq!(rests, vec![NoteValue::Half]);
+}
+
+#[test]
+fn for_export_keeps_a_midpoint_crossing_rest_run_as_two_quarter_rests() {
+    // The user's own example: a silence over beats 2-3 of 4/4 must never print
+    // as a half rest, or beat 3's onset -- the bar's secondary strong beat --
+    // disappears.
+    let mut doc = Document::new_empty();
+    doc.bars.truncate(1);
+    doc.bars[0].events = vec![
+        q_note(0),
+        beat_rest(NoteValue::Quarter),
+        beat_rest(NoteValue::Quarter),
+        q_note(1),
+    ];
+    let out = engrave::for_export(&doc);
+    let rests: Vec<NoteValue> = out.bars[0]
+        .events
+        .iter()
+        .filter(|e| e.is_rest())
+        .map(|e| e.dur.base)
+        .collect();
+    assert_eq!(rests, vec![NoteValue::Quarter, NoteValue::Quarter]);
+}
+
+#[test]
+fn for_export_leaves_a_three_four_rest_run_as_two_quarter_rests() {
+    // 3/4 has no secondary strong beat to protect, but it still isn't widened --
+    // has_wide_midpoint keys on `num >= 4`, not merely on "two beats long".
+    let mut doc = Document::new_empty();
+    doc.bars.truncate(1);
+    doc.bars[0].time_sig = Some((3, 4));
+    doc.bars[0].events = vec![
+        q_note(0),
         beat_rest(NoteValue::Quarter),
         beat_rest(NoteValue::Quarter),
     ];
