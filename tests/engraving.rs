@@ -2,9 +2,9 @@
 //! impossible to eyeball once a page is full of notes.
 
 use grat::engrave::{
-    bar_duration_secs, bar_ticks, beam_groups, beam_runs, is_complete, metronome_beats,
-    natural_bar_width, set_event_dur, set_time_sig, shift_event_dur, split_ticks, system_spacing,
-    timeline, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
+    bar_duration_secs, bar_ticks, beam_groups, beam_run_span, beam_runs, is_complete,
+    metronome_beats, natural_bar_width, set_event_dur, set_time_sig, shift_event_dur, split_ticks,
+    system_spacing, timeline, BeamGroup, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
 };
 use grat::model::*;
 use grat::notation;
@@ -284,6 +284,36 @@ fn secondary_beams_cover_only_the_shorter_values() {
     assert_eq!(beam_runs(&groups[0], 1), vec![0..=2]);
     assert_eq!(beam_runs(&groups[0], 2), vec![0..=1]);
     assert!(beam_runs(&groups[0], 3).is_empty());
+}
+
+#[test]
+fn a_lone_beamlet_hooks_toward_its_neighbour() {
+    // The "croche pointée - double" cell, both orderings: a dotted eighth (1
+    // beam) next to a sixteenth (2 beams). At level 2 the sixteenth has no
+    // partner, so it prints as a beamlet -- a short stub, not a full beam --
+    // pointing back at the note it shares its rhythmic unit with.
+    let xs = [0.0, 10.0];
+
+    // Dotted eighth, then sixteenth: the stub (at column 1) points backward,
+    // into the group, toward the dotted eighth.
+    let descending = BeamGroup {
+        events: vec![0, 1],
+        beams: vec![1, 2],
+    };
+    let run = beam_runs(&descending, 2).into_iter().next().unwrap();
+    assert_eq!(beam_run_span(&run, &xs, 1.5), (10.0, 8.5));
+
+    // Sixteenth, then dotted eighth: the stub (at column 0) points forward.
+    let ascending = BeamGroup {
+        events: vec![0, 1],
+        beams: vec![2, 1],
+    };
+    let run = beam_runs(&ascending, 2).into_iter().next().unwrap();
+    assert_eq!(beam_run_span(&run, &xs, 1.5), (0.0, 1.5));
+
+    // A run with a partner spans column to column -- no stub involved.
+    let run = beam_runs(&descending, 1).into_iter().next().unwrap();
+    assert_eq!(beam_run_span(&run, &xs, 1.5), (0.0, 10.0));
 }
 
 #[test]

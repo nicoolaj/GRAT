@@ -6,7 +6,7 @@
 //! same [`Spacing`] the staff above uses, which is what makes a fret number, its
 //! strum arrow and its note head line up in one vertical column.
 
-use crate::engrave::{beam_groups, beam_runs, Spacing};
+use crate::engrave::{beam_groups, beam_run_span, beam_runs, Spacing};
 use crate::model::{technique_color, Bar, Document, Note, NoteValue, Strum, Technique};
 use crate::staff::{
     arc, arrow_head, barline, dashed, ellipse, label_width, pt_for_cap, quad, wave, Barline, FAINT,
@@ -828,13 +828,8 @@ fn rhythm(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
             }
             for level in 1..=3u8 {
                 for run in beam_runs(group, level) {
-                    let (s, e) = (*run.start(), *run.end());
+                    let (x0, x1) = beam_run_span(&run, &xs, 1.6);
                     let y = base + (level - 1) as f32 * (BEAM_H + BEAM_GAP);
-                    let (x0, x1) = if s == e {
-                        (xs[s], if s == 0 { xs[s] + 1.6 } else { xs[s] - 1.6 })
-                    } else {
-                        (xs[s], xs[e])
-                    };
                     out.push(quad(x0.min(x1), y, x0.max(x1), y + BEAM_H, INK));
                 }
             }

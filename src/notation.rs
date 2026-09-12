@@ -10,7 +10,7 @@
 
 use std::ops::Range;
 
-use crate::engrave::{beam_groups, beam_runs, BeamGroup, Spacing};
+use crate::engrave::{beam_groups, beam_run_span, beam_runs, BeamGroup, Spacing};
 use crate::model::{technique_color, Document, Event, NoteValue, Technique};
 use crate::staff::{barline, ellipse, pt_for_cap, rest, Barline, INK, PAPER};
 use crate::{Align, Prim, Rgb, P};
@@ -645,24 +645,12 @@ fn beam_group(
 
     // Primary beam across the run, then secondary beams over the shorter values
     // only; a lone short value gets a stub pointing into the group.
+    let xs: Vec<f32> = cols.iter().map(|&(x, _, _)| x).collect();
     let step = (BEAM_H + BEAM_GAP) * sp;
     for level in 1..=3u8 {
         for run in beam_runs(group, level) {
-            let (s, e) = (*run.start(), *run.end());
+            let (x0, x1) = beam_run_span(&run, &xs, BEAMLET * sp);
             let inset = sign * (level - 1) as f32 * step;
-            let (x0, x1) = if s == e {
-                let x = cols[s].0;
-                (
-                    x,
-                    if s == 0 {
-                        x + BEAMLET * sp
-                    } else {
-                        x - BEAMLET * sp
-                    },
-                )
-            } else {
-                (cols[s].0, cols[e].0)
-            };
             out.push(beam_quad(
                 x0,
                 beam_y(x0) - inset,

@@ -909,3 +909,25 @@ pub fn beam_runs(group: &BeamGroup, level: u8) -> Vec<std::ops::RangeInclusive<u
     }
     runs
 }
+
+/// The x-span one [`beam_runs`] range covers, in the caller's own column
+/// coordinates (`xs`, one per event in the group). A run of two or more spans
+/// from its first column to its last; a lone beamlet has no partner to span
+/// to, so it gets a `beamlet`-long stub pointing back into the group -- toward
+/// the following note if it's the group's first event, toward the preceding
+/// one otherwise. Shared by the notation staff and the tablature-only rhythm
+/// row, which draw beams very differently (slanted vs. flat, up or down vs.
+/// always stacking upward) but agree on this.
+pub fn beam_run_span(
+    run: &std::ops::RangeInclusive<usize>,
+    xs: &[f32],
+    beamlet: f32,
+) -> (f32, f32) {
+    let (s, e) = (*run.start(), *run.end());
+    if s == e {
+        let x = xs[s];
+        (x, if s == 0 { x + beamlet } else { x - beamlet })
+    } else {
+        (xs[s], xs[e])
+    }
+}
