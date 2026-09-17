@@ -924,17 +924,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
                     .max_decimals(1),
             );
             ui.separator();
-            if ui
-                .selectable_label(!state.linear, t("live.view_pages"))
-                .clicked()
-            {
-                state.linear = false;
-            }
-            if ui
-                .selectable_label(state.linear, t("live.view_linear"))
-                .clicked()
-            {
-                state.linear = true;
+            let view = if state.linear {
+                t("live.view_pages")
+            } else {
+                t("live.view_linear")
+            };
+            if ui.button(view).clicked() {
+                state.linear = !state.linear;
             }
             ui.separator();
             if ui.button(t("live.exit")).clicked() {
