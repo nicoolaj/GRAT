@@ -262,17 +262,18 @@ pub fn onsets(bar: &Bar) -> Vec<u32> {
         .collect()
 }
 
-/// Seconds one tick lasts at `tempo` quarter notes per minute, whatever the
-/// metre -- the convention every tablature editor reads a tempo number by.
-/// Shared by [`timeline`] and [`metronome_beats`] so the note clock and the
-/// click clock can never drift apart.
-fn seconds_per_tick(tempo: u16) -> f32 {
-    60.0 / (tempo.max(1) as f32 * NoteValue::Quarter.ticks() as f32)
+/// Seconds one tick lasts at `tempo` beats per minute, where a beat is
+/// [`beat_ticks`] -- a quarter note in a simple metre, a dotted quarter in a
+/// compound one, which is the convention a tempo marking is read by in either
+/// case. Shared by [`timeline`] and [`metronome_beats`] so the note clock and
+/// the click clock can never drift apart.
+fn seconds_per_tick(time_sig: (u8, u8), tempo: u16) -> f32 {
+    60.0 / (tempo.max(1) as f32 * beat_ticks(time_sig) as f32)
 }
 
 /// Seconds one bar of `time_sig` lasts at `tempo`.
 pub fn bar_duration_secs(time_sig: (u8, u8), tempo: u16) -> f32 {
-    bar_ticks(time_sig) as f32 * seconds_per_tick(tempo)
+    bar_ticks(time_sig) as f32 * seconds_per_tick(time_sig, tempo)
 }
 
 /// One event's moment in playback: when it starts sounding, and when the next
@@ -290,19 +291,17 @@ pub struct Cue {
     pub end: f32,
 }
 
-/// Every event of the document in playing order, timed at `doc.tempo`.
+/// Every event of the document in playing order, timed at `doc.tempo` beats
+/// per minute (see [`seconds_per_tick`]).
 ///
 /// ponytail: repeats are not unrolled, so the piece plays through once, left to
-/// right; and a compound metre, which a player counts in dotted quarters, comes
-/// out half again too fast for a tempo written that way. Both are corrections to
-/// this one function — the cue list is what every caller reads — but unrolling
-/// also makes it revisit bars, which every position lookup would then have to
-/// disambiguate.
+/// right -- unrolling would make it revisit bars, which every position lookup
+/// (this is the cue list every caller reads) would then have to disambiguate.
 pub fn timeline(doc: &Document) -> Vec<Cue> {
-    let per_tick = seconds_per_tick(doc.tempo);
     let mut t = 0.0;
     let mut out = Vec::new();
     for (bar, b) in doc.bars.iter().enumerate() {
+        let per_tick = seconds_per_tick(doc.time_sig_at(bar), doc.tempo);
         for (event, e) in b.events.iter().enumerate() {
             let start = t;
             t += e.dur.ticks() as f32 * per_tick;
@@ -340,11 +339,11 @@ pub struct Beat {
 /// each bar's own metre -- the same grouping [`beam_groups`] beams by, so a
 /// compound bar like 6/8 clicks in two, not six.
 pub fn metronome_beats(doc: &Document) -> Vec<Beat> {
-    let per_tick = seconds_per_tick(doc.tempo);
     let mut t = 0.0;
     let mut out = Vec::new();
     for bar in 0..doc.bars.len() {
         let sig = doc.time_sig_at(bar);
+        let per_tick = seconds_per_tick(sig, doc.tempo);
         let beat = beat_ticks(sig).max(1);
         let total = bar_ticks(sig);
         let beats_in_bar = total.div_ceil(beat);

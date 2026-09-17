@@ -772,18 +772,51 @@ fn metronome_pulses_a_compound_metre_in_dotted_quarters_not_eighths() {
     let beats = metronome_beats(&doc);
     assert_eq!(beats.len(), 2, "6/8 clicks in two, not six: {beats:?}");
     assert!(beats[0].downbeat && !beats[1].downbeat);
-    // A dotted quarter at 120 bpm (quarter = 0.5s) is 0.75s.
-    assert!((beats[1].time - 0.75).abs() < 1e-4);
+    // Tempo counts the dotted-quarter beat, not a plain quarter: at 120 bpm a
+    // dotted quarter is 0.5s.
+    assert!((beats[1].time - 0.5).abs() < 1e-4);
     assert_eq!((beats[0].index_in_bar, beats[1].index_in_bar), (0, 1));
     assert!(beats.iter().all(|b| b.beats_in_bar == 2));
+}
+
+#[test]
+fn timeline_counts_a_compound_metre_in_dotted_quarters() {
+    let mut doc = doc_with(Bar {
+        events: vec![ev(NoteValue::Eighth, vec![note(0)]); 6],
+        time_sig: Some((6, 8)),
+        ..Default::default()
+    });
+    doc.tempo = 120; // dotted quarter = 120 bpm, not a plain quarter
+
+    let cues = timeline(&doc);
+    assert_eq!(cues.len(), 6);
+    // Two dotted-quarter beats of 0.5s each, three eighths per beat.
+    let wants = [
+        0.0,
+        1.0 / 6.0,
+        2.0 / 6.0,
+        0.5,
+        0.5 + 1.0 / 6.0,
+        0.5 + 2.0 / 6.0,
+    ];
+    for (cue, want) in cues.iter().zip(wants) {
+        assert!(
+            (cue.start - want).abs() < 1e-4,
+            "cue {cue:?} should start at {want}"
+        );
+    }
+    assert!(
+        (cues.last().unwrap().end - 1.0).abs() < 1e-4,
+        "one 6/8 bar at dotted-quarter=120 is one second"
+    );
 }
 
 #[test]
 fn bar_duration_matches_a_bars_worth_of_metronome_beats() {
     assert!((bar_duration_secs((4, 4), 120) - 2.0).abs() < 1e-4);
     assert!((bar_duration_secs((3, 4), 120) - 1.5).abs() < 1e-4);
-    // 6/8 at 120 is two dotted-quarter beats, same 0.75s each as above.
-    assert!((bar_duration_secs((6, 8), 120) - 1.5).abs() < 1e-4);
+    // 6/8 at 120 is two dotted-quarter beats, same 0.5s each as above.
+    assert!((bar_duration_secs((6, 8), 120) - 1.0).abs() < 1e-4);
 }
 
 #[test]
