@@ -256,6 +256,11 @@ struct TablaturesApp {
     doc: Document,
     path: Option<PathBuf>,
     dirty: bool,
+    /// Set whenever `doc` changes; cleared once `editor_ui` has repaginated for it.
+    layout_dirty: bool,
+    /// The last `layout::paginate(&doc)` result, reused across frames while
+    /// `layout_dirty` is false instead of recomputing on every single one.
+    cached_pages: Vec<grat::layout::Page>,
     pending: Option<PendingAction>,
     show_about: bool,
     show_help: bool,
@@ -303,6 +308,8 @@ impl TablaturesApp {
             doc: Document::new_empty(),
             path: None,
             dirty: false,
+            layout_dirty: true,
+            cached_pages: Vec::new(),
             pending: None,
             show_about: false,
             show_help: false,
@@ -390,6 +397,7 @@ impl TablaturesApp {
         self.doc = Document::new_empty();
         self.path = None;
         self.dirty = false;
+        self.layout_dirty = true;
         self.status_msg = None;
     }
 
@@ -408,6 +416,7 @@ impl TablaturesApp {
                 self.doc = doc;
                 self.path = Some(path);
                 self.dirty = false;
+                self.layout_dirty = true;
                 self.status_msg = None;
             }
             Some(Err(LoadError::TooNew(_))) => self.status_msg = Some(t("error.load_too_new")),
@@ -567,6 +576,7 @@ impl TablaturesApp {
                     {
                         if canvas::cut(&mut self.editor, &mut self.doc) {
                             self.dirty = true;
+                            self.layout_dirty = true;
                         }
                         ui.close();
                     }
@@ -579,6 +589,7 @@ impl TablaturesApp {
                     {
                         if canvas::paste(&mut self.editor, &mut self.doc) {
                             self.dirty = true;
+                            self.layout_dirty = true;
                         }
                         ui.close();
                     }
@@ -681,10 +692,11 @@ impl TablaturesApp {
         // empty scaffolding, and the invariant re-establishes itself on load.
         grat::layout::ensure_trailing_blank_system(&mut self.doc);
 
-        // ponytail: re-paginated every frame rather than cached and invalidated on
-        // edit -- simplest correct thing for a desktop editor's document sizes;
-        // revisit with a dirty-flag cache if a very large score ever feels laggy.
-        let pages = grat::layout::paginate(&self.doc);
+        if self.layout_dirty {
+            self.cached_pages = grat::layout::paginate(&self.doc);
+            self.layout_dirty = false;
+        }
+        let pages = &self.cached_pages;
 
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(4.0);
@@ -695,6 +707,7 @@ impl TablaturesApp {
                     .changed()
                 {
                     self.dirty = true;
+                    self.layout_dirty = true;
                 }
                 ui.label(t("field.author"));
                 if ui
@@ -702,6 +715,7 @@ impl TablaturesApp {
                     .changed()
                 {
                     self.dirty = true;
+                    self.layout_dirty = true;
                 }
                 ui.separator();
                 ui.label(t("field.tempo"));
@@ -710,6 +724,7 @@ impl TablaturesApp {
                     .changed()
                 {
                     self.dirty = true;
+                    self.layout_dirty = true;
                 }
                 ui.label(t("field.capo"));
                 if ui
@@ -717,6 +732,7 @@ impl TablaturesApp {
                     .changed()
                 {
                     self.dirty = true;
+                    self.layout_dirty = true;
                 }
                 ui.separator();
                 ui.label(t("field.tab_scale"));
@@ -732,6 +748,7 @@ impl TablaturesApp {
                     .changed()
                 {
                     self.dirty = true;
+                    self.layout_dirty = true;
                 }
                 ui.label(t("field.note_spacing"));
                 if ui
@@ -746,6 +763,7 @@ impl TablaturesApp {
                     .changed()
                 {
                     self.dirty = true;
+                    self.layout_dirty = true;
                 }
                 ui.separator();
                 egui::ComboBox::from_id_salt("block_model")
@@ -761,6 +779,7 @@ impl TablaturesApp {
                                 .changed()
                             {
                                 self.dirty = true;
+                                self.layout_dirty = true;
                             }
                         }
                     });
@@ -777,6 +796,7 @@ impl TablaturesApp {
                                 .changed()
                             {
                                 self.dirty = true;
+                                self.layout_dirty = true;
                             }
                         }
                     });
@@ -788,6 +808,7 @@ impl TablaturesApp {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 if canvas::palette(ui, &mut self.editor, &mut self.doc).is_some() {
                     self.dirty = true;
+                    self.layout_dirty = true;
                 }
             });
         });
@@ -804,15 +825,16 @@ impl TablaturesApp {
                     ui.colored_label(egui::Color32::from_rgb(0xFF, 0x3B, 0x30), msg);
                 }
                 ui.separator();
-                canvas::status(ui, &mut self.editor, &pages);
+                canvas::status(ui, &mut self.editor, pages);
             });
         });
 
         egui::CentralPanel::default()
             .frame(egui::Frame::default())
             .show(ui, |ui| {
-                if canvas::show(ui, &mut self.editor, &mut self.doc, &pages).is_some() {
+                if canvas::show(ui, &mut self.editor, &mut self.doc, pages).is_some() {
                     self.dirty = true;
+                    self.layout_dirty = true;
                 }
             });
     }
@@ -865,6 +887,7 @@ impl eframe::App for TablaturesApp {
             && canvas::undo(&mut self.editor, &mut self.doc)
         {
             self.dirty = true;
+            self.layout_dirty = true;
         }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_COPY)) {
             canvas::copy(&mut self.editor, &self.doc);
@@ -873,11 +896,13 @@ impl eframe::App for TablaturesApp {
             && canvas::cut(&mut self.editor, &mut self.doc)
         {
             self.dirty = true;
+            self.layout_dirty = true;
         }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_PASTE))
             && canvas::paste(&mut self.editor, &mut self.doc)
         {
             self.dirty = true;
+            self.layout_dirty = true;
         }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_LIVE)) {
             if self.live.open {
