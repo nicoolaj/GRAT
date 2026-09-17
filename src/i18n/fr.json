@@ -148,5 +148,20 @@
   "rest.quarter": "soupir",
   "rest.eighth": "demi-soupir",
   "rest.sixteenth": "quart de soupir",
-  "rest.thirty_second": "huitième de soupir"
+  "rest.thirty_second": "huitième de soupir",
+  "decoration.new_year": "Nouvel An",
+  "decoration.may_day": "Fête du travail",
+  "decoration.music_day": "Fête de la musique",
+  "decoration.halloween": "Halloween",
+  "decoration.st_patrick": "Saint Patrick",
+  "decoration.st_nicolas": "Saint Nicolas",
+  "decoration.epiphany": "Épiphanie",
+  "decoration.christmas": "Noël",
+  "decoration.bastille_day": "Fête nationale française",
+  "decoration.independence_day_us": "Fête nationale américaine",
+  "decoration.german_unity_day": "Fête nationale allemande",
+  "decoration.belgian_national_day": "Fête nationale belge",
+  "decoration.spanish_national_day": "Fête nationale espagnole",
+  "decoration.swiss_national_day": "Fête nationale suisse",
+  "decoration.canada_day": "Fête nationale canadienne"
 }

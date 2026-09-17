@@ -189,12 +189,35 @@ fn main() -> eframe::Result {
     }
 
     let (logo_rgba, logo_w, logo_h) = load_logo_rgba();
+    // Today's decoration, if any, is baked into its own copy of the icon pixels --
+    // egui only takes an icon once, via `ViewportBuilder::with_icon`, so there is no
+    // live-update path to decorate it later. The window/About/Help texture below
+    // stays undecorated; the same `Decoration` is instead painted live on top of it
+    // (see `splash`/the About window) via `canvas::paint_decoration`.
+    let today_decoration = grat::decorations::decoration_for_today();
+    let icon_rgba = match &today_decoration {
+        Some(deco) => {
+            let mut baked = logo_rgba.clone();
+            let radius = logo_w.min(logo_h) as f32 * 0.36;
+            grat::decorations::bake(
+                &mut baked,
+                logo_w,
+                logo_h,
+                logo_w as f32 / 2.0,
+                logo_h as f32 / 2.0,
+                radius,
+                deco,
+            );
+            baked
+        }
+        None => logo_rgba.clone(),
+    };
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 720.0])
             .with_min_inner_size([640.0, 480.0])
             .with_icon(egui::IconData {
-                rgba: logo_rgba.clone(),
+                rgba: icon_rgba,
                 width: logo_w,
                 height: logo_h,
             }),
@@ -204,7 +227,15 @@ fn main() -> eframe::Result {
     eframe::run_native(
         random_expansion(),
         native_options,
-        Box::new(move |cc| Ok(Box::new(TablaturesApp::new(cc, logo_rgba, logo_w, logo_h)))),
+        Box::new(move |cc| {
+            Ok(Box::new(TablaturesApp::new(
+                cc,
+                logo_rgba,
+                logo_w,
+                logo_h,
+                today_decoration,
+            )))
+        }),
     )
 }
 
@@ -280,10 +311,19 @@ struct TablaturesApp {
     /// The reading of GRAT this launch's splash shows -- an independent draw from
     /// the one in the window title.
     splash_reading: &'static str,
+    /// Today's calendar decoration, if any -- computed once at startup, shown on the
+    /// splash and About windows (and already baked into the dock/taskbar icon).
+    today_decoration: Option<grat::decorations::Decoration>,
 }
 
 impl TablaturesApp {
-    fn new(cc: &eframe::CreationContext<'_>, logo_rgba: Vec<u8>, logo_w: u32, logo_h: u32) -> Self {
+    fn new(
+        cc: &eframe::CreationContext<'_>,
+        logo_rgba: Vec<u8>,
+        logo_w: u32,
+        logo_h: u32,
+        today_decoration: Option<grat::decorations::Decoration>,
+    ) -> Self {
         let mut editor = canvas::EditorState::default();
         if let Some(storage) = cc.storage {
             if let Some(lang) = storage.get_string(i18n::LANG_STORAGE_KEY) {
@@ -320,6 +360,7 @@ impl TablaturesApp {
             logo,
             splash_until: Some(std::time::Instant::now() + std::time::Duration::from_millis(2200)),
             splash_reading: random_expansion(),
+            today_decoration,
         }
     }
 
@@ -365,6 +406,16 @@ impl TablaturesApp {
             egui::FontId::proportional(19.0),
             egui::Color32::from_rgb(0xF2, 0xA0, 0x49),
         );
+        if let Some(deco) = &self.today_decoration {
+            canvas::paint_decoration(&painter, logo_rect.center(), s * 0.55, deco);
+            painter.text(
+                egui::pos2(screen.center().x, logo_rect.bottom() + 54.0),
+                egui::Align2::CENTER_TOP,
+                t(deco.caption_key),
+                egui::FontId::proportional(14.0),
+                egui::Color32::from_rgb(0xB0, 0xB0, 0xB8),
+            );
+        }
         ui.ctx().request_repaint();
         true
     }
@@ -977,7 +1028,10 @@ impl eframe::App for TablaturesApp {
             .show(ui.ctx(), |ui| {
                 ui.set_min_width(300.0);
                 ui.vertical_centered(|ui| {
-                    ui.image((self.logo.id(), egui::vec2(120.0, 120.0)));
+                    let logo_resp = ui.image((self.logo.id(), egui::vec2(120.0, 120.0)));
+                    if let Some(deco) = &self.today_decoration {
+                        canvas::paint_decoration(ui.painter(), logo_resp.rect.center(), 60.0, deco);
+                    }
                     ui.heading(t("app.title"));
                     ui.label(EXPANSIONS[0]);
                     ui.label(format!(
@@ -985,6 +1039,9 @@ impl eframe::App for TablaturesApp {
                         t("about.version"),
                         env!("CARGO_PKG_VERSION")
                     ));
+                    if let Some(deco) = &self.today_decoration {
+                        ui.label(t(deco.caption_key));
+                    }
                 });
                 ui.add_space(8.0);
                 ui.label(t("about.tagline"));

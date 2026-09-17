@@ -4,6 +4,7 @@
 //! Kept free of any GUI dependency so it can be exercised from integration tests and
 //! from the `--export` CLI path without opening a window.
 
+pub mod decorations;
 pub mod engrave;
 pub mod i18n;
 pub mod layout;

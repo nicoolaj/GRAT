@@ -48,7 +48,8 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `notation.rs` | the five-line staff: clef, heads, stems, beams, accidentals, ties, ledger lines |
 | `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs, strum row, rhythm stems |
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, hit boxes |
-| `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette |
+| `decorations.rs` | calendar decorations for the logo (confetti, flags, pumpkins...): the date → `Decoration` table, its shape vocabulary, and `bake`, the pixel rasterizer that stamps one into the dock/taskbar icon's raw RGBA. GUI-free like the rest of the library; its live, on-screen counterpart is `canvas::paint_decoration` |
+| `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette, and the live rendering of a `decorations::Decoration` (`paint_decoration`) |
 | `live.rs` | the live player: transport, the two scrolling views, the highlighter, the metronome (click + flash + count-in), and the piece's own sound (one decaying tone per note, its pitch a piecewise-linear programme so a bend, a slide and a trill glide or alternate instead of sounding flat) crossfaded against the click. A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. Both the click and the note synthesis are macOS/Windows only — see "Verified API facts" |
 | `pdf.rs` | `Prim` → printpdf ops |
 | `main.rs` | window, theme, menus, dialogs, shortcuts, launch splash, `--export` CLI |
@@ -188,6 +189,15 @@ sheet.
 row stacking) and in `tablature::shows_rhythm` — a block with no notation staff must carry its own
 rhythm stems, or it says which frets to play but never when.
 
+**Add a calendar decoration.** Add a `(month, day)` arm to `decorations::decoration_for` and a
+shape-builder function returning a `Decoration` — reuse `flag_bands`/`firework`/`star`/`square`/
+`leaf` where they fit rather than hand-listing points again. Add the pair to `DECORATED_DATES` too
+(it drives both the "everything else is `None`" test and the preview grids), and a `decoration.*`
+key in both language files. Regenerate `dist/decorations-preview.svg` and `dist/icon-preview.png`
+(`cargo test --test decorations_visual`) and actually look at them — a white or near-white shape
+needs a border or a colored ring behind it (see `rect_border`), or it vanishes against a light
+backdrop.
+
 **Change the save format.** `.gtab` is `serde_json` of `Document`, carrying `format_version`
 (`model::FORMAT_VERSION`). Adding a field with `#[serde(default)]` needs no bump — old files still
 load. Renaming/removing a field, or changing a type, is a breaking change: bump `FORMAT_VERSION`,
@@ -225,6 +235,12 @@ not things assertions can judge.
 
 On macOS without an SVG viewer to hand: `qlmanage -t -s 1500 -o /tmp dist/notation-preview.svg`
 produces a PNG.
+
+`cargo test --test decorations_visual` is the same idea for `decorations.rs`: it writes every
+calendar decoration's vector shapes to `dist/decorations-preview.svg` and bakes each one onto a
+copy of the real bundled logo at `dist/icon-preview.png` — the literal dock/taskbar icon output,
+for the fifteen decorations you can't otherwise see without waiting for their one real day a year
+(or setting `GRAT_ICON_DATE=MM-DD` and actually running the app).
 
 ## Conventions
 

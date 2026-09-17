@@ -148,5 +148,20 @@
   "rest.quarter": "quarter rest",
   "rest.eighth": "eighth rest",
   "rest.sixteenth": "sixteenth rest",
-  "rest.thirty_second": "thirty-second rest"
+  "rest.thirty_second": "thirty-second rest",
+  "decoration.new_year": "New Year",
+  "decoration.may_day": "Labour Day",
+  "decoration.music_day": "Music Day",
+  "decoration.halloween": "Halloween",
+  "decoration.st_patrick": "St Patrick's Day",
+  "decoration.st_nicolas": "St Nicholas' Day",
+  "decoration.epiphany": "Epiphany",
+  "decoration.christmas": "Christmas",
+  "decoration.bastille_day": "French National Day",
+  "decoration.independence_day_us": "American Independence Day",
+  "decoration.german_unity_day": "German National Day",
+  "decoration.belgian_national_day": "Belgian National Day",
+  "decoration.spanish_national_day": "Spanish National Day",
+  "decoration.swiss_national_day": "Swiss National Day",
+  "decoration.canada_day": "Canadian National Day"
 }

@@ -137,6 +137,51 @@ pub(crate) fn rgb(c: grat::Rgb) -> egui::Color32 {
     egui::Color32::from_rgb(c.0, c.1, c.2)
 }
 
+/// Paints a calendar decoration's shapes centered on `center` with `radius` pixels --
+/// the same rect the logo image itself occupies (splash, About). This is the live,
+/// on-screen counterpart of `decorations::bake`, which stamps the same `Decoration`
+/// into the dock/taskbar icon's raw pixels once, at startup; this file is the only
+/// place in the app that touches egui widgets directly, which is why the renderer
+/// lives here rather than alongside the GUI-free shape data in the library.
+pub(crate) fn paint_decoration(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    radius: f32,
+    deco: &grat::decorations::Decoration,
+) {
+    for shape in &deco.shapes {
+        match shape {
+            grat::decorations::Shape::Circle { c, r, color } => {
+                painter.circle_filled(
+                    center + egui::vec2(c.0, c.1) * radius,
+                    r * radius,
+                    rgb(*color),
+                );
+            }
+            grat::decorations::Shape::Poly { pts, color } => {
+                let points: Vec<egui::Pos2> = pts
+                    .iter()
+                    .map(|&(x, y)| center + egui::vec2(x, y) * radius)
+                    .collect();
+                painter.add(egui::Shape::convex_polygon(
+                    points,
+                    rgb(*color),
+                    egui::Stroke::NONE,
+                ));
+            }
+            grat::decorations::Shape::Line { a, b, w, color } => {
+                painter.line_segment(
+                    [
+                        center + egui::vec2(a.0, a.1) * radius,
+                        center + egui::vec2(b.0, b.1) * radius,
+                    ],
+                    egui::Stroke::new(w * radius, rgb(*color)),
+                );
+            }
+        }
+    }
+}
+
 /// Whether `tech` keeps a button in the palette. The bit is the technique's position
 /// in `TECH_LEGEND`; scanning twenty entries per button is cheaper than a second
 /// table to keep in sync. A technique missing from the table stays visible.
