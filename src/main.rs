@@ -970,7 +970,7 @@ impl eframe::App for TablaturesApp {
         // `export_clipboard` on every copy/cut. Left alone while a text field (title,
         // author) has focus, so plain text copy/paste keeps working there.
         let (mut copy, mut cut, mut paste) = (false, false, None);
-        if !ui.ctx().egui_wants_keyboard_input() {
+        if !ui.ctx().text_edit_focused() {
             ui.ctx().input_mut(|i| {
                 i.events.retain(|e| {
                     match e {

@@ -489,9 +489,12 @@ pub fn cut(state: &mut EditorState, doc: &mut Document) -> bool {
     true
 }
 
-/// Paste the clipboard starting at the selected cell, overwriting the content (not
-/// the duration) of one event per clipboard entry in document order. Stops at the
-/// end of the document rather than inserting, so no bar's total duration ever changes.
+/// Paste the clipboard starting at the selected cell, one clipboard event per step
+/// in document order. Each target event first takes the clipboard event's duration
+/// (via `engrave::set_event_dur`, which backfills with rests or swallows what follows
+/// so the bar total never changes), then its content -- so eight sixteenths pasted
+/// over an empty bar of quarter rests come out as eight sixteenths, not four
+/// quarters. Stops at the end of the document rather than inserting bars.
 ///
 /// ponytail: techniques that find their partner by position in the bar (slide,
 /// hammer-on/pull-off, trill -- via `Bar::next_on_string`) are copied as-is; at the
@@ -508,23 +511,28 @@ pub fn paste(state: &mut EditorState, doc: &mut Document) -> bool {
     let clip = state.clipboard.clone();
     let mut pasted = false;
     mutate(state, doc, |doc| {
-        let positions = flat_positions(doc);
-        let Some(start) = positions.iter().position(|&p| p == (sel.bar, sel.event)) else {
-            return;
-        };
-        for (i, ev) in clip.into_iter().enumerate() {
-            let Some(&(b, e)) = positions.get(start + i) else {
-                break;
-            };
-            if let Some(event) = doc.bars.get_mut(b).and_then(|bar| bar.events.get_mut(e)) {
-                // The cell keeps its own duration: copying the clipboard's would
-                // change the bar's total and leave it over- or underfull.
-                *event = model::Event {
-                    dur: event.dur,
-                    ..ev
-                };
-                pasted = true;
+        let (mut b, mut e) = (sel.bar, sel.event);
+        for ev in clip {
+            if doc.bars.get(b).is_some_and(|bar| e >= bar.events.len()) {
+                (b, e) = (b + 1, 0);
             }
+            if b >= doc.bars.len() {
+                break;
+            }
+            let sig = doc.time_sig_at(b);
+            let bar = &mut doc.bars[b];
+            if e >= bar.events.len() {
+                break;
+            }
+            // Clamped at the bar line when the clipboard event doesn't fit.
+            engrave::set_event_dur(bar, sig, e, ev.dur);
+            let event = &mut bar.events[e];
+            *event = model::Event {
+                dur: event.dur,
+                ..ev
+            };
+            pasted = true;
+            e += 1;
         }
     });
     pasted
@@ -1796,6 +1804,41 @@ mod tests {
         assert_eq!(doc.bars[1].events[0].notes[0].fret, 3);
         assert_eq!(doc.bars[1].events[1].notes[0].fret, 5);
         assert_eq!(doc.bars[1].events[1].notes[0].string, 1);
+    }
+
+    #[test]
+    fn paste_carries_the_clipboard_rhythm() {
+        let mut doc = Document::new_empty(); // 4/4, bars of 4 quarter rests
+        let sixteenth = model::Dur {
+            base: NoteValue::Sixteenth,
+            dots: 0,
+        };
+        let mut state = EditorState {
+            clipboard: (0..8)
+                .map(|fret| model::Event {
+                    dur: sixteenth,
+                    notes: vec![model::Note {
+                        string: 1,
+                        fret,
+                        tech: Technique::Plain,
+                        tie_next: false,
+                    }],
+                    ..Default::default()
+                })
+                .collect(),
+            selected: Some(Sel {
+                bar: 1,
+                event: 0,
+                string: 0,
+            }),
+            ..Default::default()
+        };
+        assert!(paste(&mut state, &mut doc));
+        let bar = &doc.bars[1];
+        assert!(bar.events[..8].iter().all(|e| e.dur == sixteenth));
+        assert_eq!(bar.events[7].notes[0].fret, 7);
+        assert!(engrave::is_complete(bar, doc.time_sig_at(1)));
+        assert!(doc.bars[2].events.iter().all(|e| e.is_rest()));
     }
 
     #[test]
