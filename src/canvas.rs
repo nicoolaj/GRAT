@@ -116,6 +116,29 @@ fn snapshot(state: &mut EditorState, doc: &Document) {
 }
 
 /// Push an undo snapshot, then run the mutation.
+/// The time signatures offered, per bar here and for the whole piece in the
+/// Tools menu.
+/// ponytail: fixed list; a num/den pair if someone asks for 13/16.
+pub const TIME_SIGS: [(u8, u8); 9] = [
+    (2, 4),
+    (3, 4),
+    (4, 4),
+    (5, 4),
+    (6, 8),
+    (7, 8),
+    (9, 8),
+    (12, 8),
+    (2, 2),
+];
+
+/// Rebar the whole piece in `sig`, undoably. The selection is dropped: the bar
+/// count changes, so the indices it held may no longer exist.
+pub fn set_time_sig_everywhere(state: &mut EditorState, doc: &mut Document, sig: (u8, u8)) {
+    mutate(state, doc, |doc| engrave::set_time_sig_everywhere(doc, sig));
+    state.selected = None;
+    state.range_anchor = None;
+}
+
 fn mutate(state: &mut EditorState, doc: &mut Document, f: impl FnOnce(&mut Document)) {
     snapshot(state, doc);
     f(doc);
@@ -1533,18 +1556,7 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
                         mutate(state, doc, move |doc| engrave::set_time_sig(doc, b, None));
                         action = Some(Action::Changed);
                     }
-                    // ponytail: fixed list; a num/den pair if someone asks for 13/16.
-                    for sig in [
-                        (2u8, 4u8),
-                        (3, 4),
-                        (4, 4),
-                        (5, 4),
-                        (6, 8),
-                        (7, 8),
-                        (9, 8),
-                        (12, 8),
-                        (2, 2),
-                    ] {
+                    for sig in TIME_SIGS {
                         if ui
                             .selectable_label(current == Some(sig), format!("{}/{}", sig.0, sig.1))
                             .clicked()

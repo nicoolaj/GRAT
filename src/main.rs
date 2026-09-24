@@ -719,6 +719,23 @@ impl TablaturesApp {
                     });
                 });
 
+                ui.menu_button(t("menu.tools"), |ui| {
+                    ui.menu_button(t("menu.time_sig_all"), |ui| {
+                        for sig in canvas::TIME_SIGS {
+                            if ui.button(format!("{}/{}", sig.0, sig.1)).clicked() {
+                                canvas::set_time_sig_everywhere(
+                                    &mut self.editor,
+                                    &mut self.doc,
+                                    sig,
+                                );
+                                self.dirty = true;
+                                self.layout_dirty = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+
                 ui.menu_button(t("menu.view"), |ui| {
                     let sc_live = ui.ctx().format_shortcut(&SHORTCUT_LIVE);
                     if ui

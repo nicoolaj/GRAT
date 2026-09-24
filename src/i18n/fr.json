@@ -15,6 +15,8 @@
   "menu.paste": "Coller",
   "menu.input_mode": "Mode de saisie",
   "menu.note_styles": "Styles de notes",
+  "menu.tools": "Outils",
+  "menu.time_sig_all": "Chiffrage de toute la partition",
   "menu.view": "Affichage",
   "menu.live": "Mode live",
   "menu.help": "Aide",

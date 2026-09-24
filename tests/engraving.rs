@@ -3,8 +3,9 @@
 
 use grat::engrave::{
     bar_duration_secs, bar_ticks, beam_groups, beam_run_span, beam_runs, is_complete,
-    metronome_beats, natural_bar_width, set_event_dur, set_time_sig, shift_event_dur, split_ticks,
-    system_spacing, timeline, BeamGroup, BAR_GAP_MM, SLIDE_IN_LEAD_MM,
+    metronome_beats, natural_bar_width, set_event_dur, set_time_sig, set_time_sig_everywhere,
+    shift_event_dur, split_ticks, system_spacing, timeline, BeamGroup, BAR_GAP_MM,
+    SLIDE_IN_LEAD_MM,
 };
 use grat::model::*;
 use grat::notation;
@@ -576,6 +577,20 @@ fn set_time_sig_reflows_notes_instead_of_dropping_them() {
     assert_eq!(doc.bars.len(), 2);
     assert_eq!(total_notes(&doc), 8);
     assert_eq!(doc, two_bars_of_distinct_quarters_with_repeat());
+}
+
+#[test]
+fn set_time_sig_everywhere_drops_inner_changes_and_keeps_notes() {
+    let mut doc = two_bars_of_distinct_quarters();
+    doc.bars[1].time_sig = Some((3, 4));
+    doc.bars[1].events.pop(); // a full 3/4 bar: frets 4, 5, 6
+    set_time_sig_everywhere(&mut doc, (2, 4));
+    // 4/4 + 3/4 = 7 quarters -> four 2/4 bars, the last padded.
+    assert_eq!(doc.bars.len(), 4);
+    assert_eq!(total_notes(&doc), 7);
+    assert_eq!(doc.bars[0].time_sig, Some((2, 4)));
+    assert!(doc.bars[1..].iter().all(|b| b.time_sig.is_none()));
+    assert!(doc.bars.iter().all(|b| is_complete(b, (2, 4))));
 }
 
 fn two_bars_of_distinct_quarters_with_repeat() -> Document {

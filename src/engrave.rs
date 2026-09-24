@@ -592,6 +592,19 @@ pub fn set_time_sig(doc: &mut Document, bar_index: usize, sig: Option<(u8, u8)>)
     let end = (bar_index + 1..doc.bars.len())
         .find(|&i| doc.bars[i].time_sig.is_some())
         .unwrap_or(doc.bars.len());
+    reflow(doc, bar_index, end, sig);
+}
+
+/// Put the whole piece in `sig`: every signature change inside it goes, and all
+/// of it is reflowed as [`set_time_sig`] reflows one section.
+pub fn set_time_sig_everywhere(doc: &mut Document, sig: (u8, u8)) {
+    let len = doc.bars.len();
+    reflow(doc, 0, len, Some(sig));
+}
+
+/// Replace `doc.bars[bar_index..end]` by the same music barred in `sig`, the first
+/// new bar carrying `sig`. The old bars' own signature overrides go with them.
+fn reflow(doc: &mut Document, bar_index: usize, end: usize, sig: Option<(u8, u8)>) {
     let old_caps: Vec<u32> = (bar_index..end)
         .map(|i| bar_ticks(doc.time_sig_at(i)))
         .collect();
