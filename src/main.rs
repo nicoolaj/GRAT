@@ -475,6 +475,15 @@ impl TablaturesApp {
         }
     }
 
+    /// Mirror the editor's clipboard onto the system clipboard as JSON: egui only
+    /// emits `Event::Paste` when that clipboard holds text, and JSON lets another
+    /// GRAT window paste it back.
+    fn export_clipboard(&self, ctx: &egui::Context) {
+        if let Ok(json) = serde_json::to_string(&self.editor.clipboard) {
+            ctx.copy_text(json);
+        }
+    }
+
     fn do_save(&mut self) {
         match self.path.clone() {
             Some(path) => self.save_to(path),
@@ -615,7 +624,9 @@ impl TablaturesApp {
                         )
                         .clicked()
                     {
-                        canvas::copy(&mut self.editor, &self.doc);
+                        if canvas::copy(&mut self.editor, &self.doc) {
+                            self.export_clipboard(ui.ctx());
+                        }
                         ui.close();
                     }
                     if ui
@@ -626,6 +637,7 @@ impl TablaturesApp {
                         .clicked()
                     {
                         if canvas::cut(&mut self.editor, &mut self.doc) {
+                            self.export_clipboard(ui.ctx());
                             self.dirty = true;
                             self.layout_dirty = true;
                         }
@@ -952,20 +964,43 @@ impl eframe::App for TablaturesApp {
             self.dirty = true;
             self.layout_dirty = true;
         }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_COPY)) {
-            canvas::copy(&mut self.editor, &self.doc);
+        // egui-winit turns Cmd/Ctrl+C, X, V into `Event::Copy`/`Cut`/`Paste` and sends
+        // no `Key` event for them, so `consume_shortcut` would never see these three.
+        // `Paste` only arrives when the system clipboard holds text, hence
+        // `export_clipboard` on every copy/cut. Left alone while a text field (title,
+        // author) has focus, so plain text copy/paste keeps working there.
+        let (mut copy, mut cut, mut paste) = (false, false, None);
+        if !ui.ctx().egui_wants_keyboard_input() {
+            ui.ctx().input_mut(|i| {
+                i.events.retain(|e| {
+                    match e {
+                        egui::Event::Copy => copy = true,
+                        egui::Event::Cut => cut = true,
+                        egui::Event::Paste(text) => paste = Some(text.clone()),
+                        _ => return true,
+                    }
+                    false
+                })
+            });
         }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_CUT))
-            && canvas::cut(&mut self.editor, &mut self.doc)
-        {
+        if copy && canvas::copy(&mut self.editor, &self.doc) {
+            self.export_clipboard(ui.ctx());
+        }
+        if cut && canvas::cut(&mut self.editor, &mut self.doc) {
+            self.export_clipboard(ui.ctx());
             self.dirty = true;
             self.layout_dirty = true;
         }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_PASTE))
-            && canvas::paste(&mut self.editor, &mut self.doc)
-        {
-            self.dirty = true;
-            self.layout_dirty = true;
+        if let Some(text) = paste {
+            // A copy from another GRAT window lands here as JSON; anything else on the
+            // system clipboard just triggers a paste of our own clipboard.
+            if let Ok(events) = serde_json::from_str::<Vec<grat::model::Event>>(&text) {
+                self.editor.clipboard = events;
+            }
+            if canvas::paste(&mut self.editor, &mut self.doc) {
+                self.dirty = true;
+                self.layout_dirty = true;
+            }
         }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_LIVE)) {
             if self.live.open {
