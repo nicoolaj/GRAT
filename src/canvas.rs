@@ -489,8 +489,8 @@ pub fn cut(state: &mut EditorState, doc: &mut Document) -> bool {
     true
 }
 
-/// Paste the clipboard starting at the selected cell, one clipboard event per step
-/// in document order. Each target event first takes the clipboard event's duration
+/// Paste the clipboard starting at the selected cell (or the start of the selected
+/// range), one clipboard event per step in document order. Each target event first takes the clipboard event's duration
 /// (via `engrave::set_event_dur`, which backfills with rests or swallows what follows
 /// so the bar total never changes), then its content -- so eight sixteenths pasted
 /// over an empty bar of quarter rests come out as eight sixteenths, not four
@@ -508,10 +508,12 @@ pub fn paste(state: &mut EditorState, doc: &mut Document) -> bool {
     let Some(sel) = state.selected else {
         return false;
     };
+    // With a range selected, paste from its start, whichever end is the live one.
+    let ((b0, e0), _) = event_span(state.range_anchor.unwrap_or(sel), sel);
     let clip = state.clipboard.clone();
     let mut pasted = false;
     mutate(state, doc, |doc| {
-        let (mut b, mut e) = (sel.bar, sel.event);
+        let (mut b, mut e) = (b0, e0);
         for ev in clip {
             if doc.bars.get(b).is_some_and(|bar| e >= bar.events.len()) {
                 (b, e) = (b + 1, 0);
