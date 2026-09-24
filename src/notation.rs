@@ -69,6 +69,8 @@ const HEAD_HOLLOW: f32 = 0.62; // inner ellipse ratio for half and whole heads
 const STEM_W: f32 = 0.13;
 const STEM_LEN: f32 = 3.5;
 const STEM_MIN: f32 = 2.0;
+const FLAG_STEP: f32 = 0.74; // distance between stacked flags, in spaces
+const FLAG_EXTRA: f32 = 0.75; // stem lengthening per flag past the first, in spaces
 const BEAM_H: f32 = 0.5;
 const BEAM_GAP: f32 = 0.32;
 const BEAMLET: f32 = 1.1; // length of a partial beam, in spaces
@@ -260,8 +262,10 @@ fn render_bar(
         // Only unbeamed notes carry their own stem and flag; beamed ones get theirs
         // from the group, which knows where the beam ended up.
         if direction[ei].is_none() && !matches!(event.dur.base, NoteValue::Whole) {
-            if let Some(tip) = stem(&heads, sp, up, STEM_LEN, out) {
-                let flags = event.dur.base.flags();
+            let flags = event.dur.base.flags();
+            // Each flag past the first lengthens the stem so the flags don't crowd the head.
+            let len = STEM_LEN + flags.saturating_sub(1) as f32 * FLAG_EXTRA;
+            if let Some(tip) = stem(&heads, sp, up, len, origin.y + 2.0 * sp, out) {
                 if flags > 0 {
                     flag(tip, sp, up, flags, out);
                 }
@@ -530,14 +534,20 @@ fn head_extremes(heads: &[Head], up: bool) -> (f32, f32) {
     }
 }
 
-/// Draw a stem of the default length; returns its tip.
-fn stem(heads: &[Head], sp: f32, up: bool, len: f32, out: &mut Vec<Prim>) -> Option<P> {
+/// Draw a stem of `len` spaces, stretched if needed to reach the middle line `mid`
+/// (a note on ledger lines would otherwise hang off a stem that never meets the staff);
+/// returns its tip.
+fn stem(heads: &[Head], sp: f32, up: bool, len: f32, mid: f32, out: &mut Vec<Prim>) -> Option<P> {
     if heads.is_empty() {
         return None;
     }
     let x = stem_x(heads, sp, up);
     let (foot, far) = head_extremes(heads, up);
-    let tip = far + if up { len * sp } else { -len * sp };
+    let tip = if up {
+        (far + len * sp).max(mid)
+    } else {
+        (far - len * sp).min(mid)
+    };
     out.push(Prim::Line {
         a: P { x, y: foot },
         b: P { x, y: tip },
@@ -547,25 +557,54 @@ fn stem(heads: &[Head], sp: f32, up: bool, len: f32, out: &mut Vec<Prim>) -> Opt
     Some(P { x, y: tip })
 }
 
+/// Flags always hang to the right of the stem and curl back towards the head. Each
+/// is a filled outline around a cubic spine: it swells to its widest a third of the
+/// way along, then thins to a fine point, as engraved flags do.
 fn flag(tip: P, sp: f32, up: bool, n: u8, out: &mut Vec<Prim>) {
+    const STEPS: usize = 16;
     let dir = if up { -1.0 } else { 1.0 };
     for i in 0..n {
-        let y = tip.y + dir * i as f32 * 0.74 * sp;
-        out.push(Prim::Curve {
-            a: P { x: tip.x, y },
-            c1: P {
-                x: tip.x + 0.95 * sp,
-                y: y + dir * 0.15 * sp,
-            },
-            c2: P {
-                x: tip.x + 1.15 * sp,
-                y: y + dir * 0.95 * sp,
-            },
-            b: P {
-                x: tip.x + 0.45 * sp,
-                y: y + dir * 1.65 * sp,
-            },
-            w: 0.26 * sp,
+        let y = tip.y + dir * i as f32 * FLAG_STEP * sp;
+        // Only the flag nearest the head curls back; one further out has a shorter,
+        // straighter tail, or its curl would cut through the flag beneath it.
+        let spine = if i + 1 == n {
+            [(0.0, 0.0), (0.95, 0.15), (1.15, 0.95), (0.45, 1.65)]
+        } else {
+            [(0.0, 0.0), (0.9, 0.15), (1.1, 0.55), (0.95, 1.0)]
+        };
+        let ctrl = spine.map(|(dx, dy)| (tip.x + dx * sp, y + dir * dy * sp));
+        let at = |t: f32| {
+            let u = 1.0 - t;
+            let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+            (0..4).fold((0.0, 0.0), |(x, y), k| {
+                (x + w[k] * ctrl[k].0, y + w[k] * ctrl[k].1)
+            })
+        };
+        let mut left = Vec::with_capacity(STEPS + 1);
+        let mut right = Vec::with_capacity(STEPS + 1);
+        for s in 0..=STEPS {
+            let t = s as f32 / STEPS as f32;
+            let (x, y) = at(t);
+            let (x1, y1) = at((t + 0.01).min(1.0));
+            let (x0, y0) = at((t - 0.01).max(0.0));
+            let (tx, ty) = (x1 - x0, y1 - y0);
+            let len = (tx * tx + ty * ty).sqrt().max(1e-6);
+            let half =
+                0.5 * sp * (0.34 * (std::f32::consts::PI * (0.25 + 0.75 * t)).sin()).max(0.03);
+            let (nx, ny) = (-ty / len * half, tx / len * half);
+            left.push(P {
+                x: x + nx,
+                y: y + ny,
+            });
+            right.push(P {
+                x: x - nx,
+                y: y - ny,
+            });
+        }
+        right.reverse();
+        left.extend(right);
+        out.push(Prim::Poly {
+            pts: left,
             color: INK,
         });
     }
@@ -630,6 +669,8 @@ fn beam_group(
     for &(x, _, far) in &cols {
         let at = y0 + (x - first.0) * rise / dx;
         deficit = deficit.max(sign * (far + sign * STEM_MIN * sp - at));
+        // Like a lone stem, a beamed one on ledger notes still has to reach the middle line.
+        deficit = deficit.max(sign * (origin.y + 2.0 * sp - at));
     }
     y0 += sign * deficit.max(0.0);
     let beam_y = |x: f32| y0 + (x - first.0) * rise / dx;

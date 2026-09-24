@@ -157,11 +157,42 @@ fn rhythm_bar() -> Bar {
     }
 }
 
+/// Lone flagged notes, stems up and down, one on ledger lines, each walled off by a
+/// rest so nothing beams them.
+fn flag_bar() -> Bar {
+    let e = |base, dots, notes| Event {
+        dur: Dur { base, dots },
+        notes,
+        ..Default::default()
+    };
+    let n = |string, fret| {
+        vec![Note {
+            string,
+            fret,
+            tech: Technique::Plain,
+            tie_next: false,
+        }]
+    };
+    Bar {
+        events: vec![
+            e(NoteValue::Eighth, 0, n(0, 5)),
+            e(NoteValue::Eighth, 0, vec![]),
+            e(NoteValue::Sixteenth, 0, n(4, 2)),
+            e(NoteValue::Eighth, 1, vec![]),
+            e(NoteValue::Sixteenth, 0, n(0, 8)),
+            e(NoteValue::Eighth, 1, vec![]),
+            e(NoteValue::Sixteenth, 0, n(5, 0)),
+            e(NoteValue::Eighth, 1, vec![]),
+        ],
+        ..Default::default()
+    }
+}
+
 #[test]
 fn proof_sheet() {
     let mut doc = Document::new_empty();
     doc.title = "Engraving proof".into();
-    doc.bars = vec![technique_bar(), span_bar(), rhythm_bar()];
+    doc.bars = vec![technique_bar(), span_bar(), rhythm_bar(), flag_bar()];
 
     let music = 180.0 - tablature::HEAD_MM;
     let left = 15.0 + tablature::HEAD_MM;
@@ -173,7 +204,7 @@ fn proof_sheet() {
     tablature::render(
         &doc,
         &sp,
-        P { x: left, y: 132.0 },
+        P { x: left, y: 157.0 },
         false,
         &mut prims,
         &mut hits,
@@ -185,24 +216,29 @@ fn proof_sheet() {
     tablature::render(
         &doc,
         &sp,
-        P { x: left, y: 86.0 },
+        P { x: left, y: 111.0 },
         false,
         &mut prims,
         &mut hits,
     );
-    tablature::render_strum(&doc, &sp, P { x: left, y: 79.0 }, &mut prims);
-    notation::render(&doc, &sp, P { x: left, y: 62.0 }, &mut prims);
+    tablature::render_strum(&doc, &sp, P { x: left, y: 104.0 }, &mut prims);
+    notation::render(&doc, &sp, P { x: left, y: 87.0 }, &mut prims);
 
     // Row 3 — tablature alone, so it has to carry the rhythm itself.
     let sp = engrave::system_spacing(&doc, 2..3, Some(music));
     tablature::render(
         &doc,
         &sp,
-        P { x: left, y: 26.0 },
+        P { x: left, y: 51.0 },
         true,
         &mut prims,
         &mut hits,
     );
+
+    // Row 4 — the staff alone, lone flags up and down and a stem stretched to the
+    // middle line.
+    let sp = engrave::system_spacing(&doc, 3..4, Some(music));
+    notation::render(&doc, &sp, P { x: left, y: 16.0 }, &mut prims);
 
     assert!(
         prims.len() > 300,
@@ -227,7 +263,7 @@ fn proof_sheet() {
     );
 
     std::fs::create_dir_all("dist").ok();
-    std::fs::write("dist/notation-preview.svg", svg(&prims, 210.0, 160.0)).unwrap();
+    std::fs::write("dist/notation-preview.svg", svg(&prims, 210.0, 185.0)).unwrap();
     eprintln!("wrote dist/notation-preview.svg");
 }
 
