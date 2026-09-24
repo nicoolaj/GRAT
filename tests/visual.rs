@@ -201,39 +201,21 @@ fn proof_sheet() {
 
     // Row 1 — every technique glyph.
     let sp = engrave::system_spacing(&doc, 0..1, Some(music));
-    tablature::render(
-        &doc,
-        &sp,
-        P { x: left, y: 157.0 },
-        false,
-        &mut prims,
-        &mut hits,
-    );
+    tablature::render(&doc, &sp, P { x: left, y: 157.0 }, &mut prims, &mut hits);
 
     // Row 2 — a full three-row block: tablature, strumming, staff, one Spacing for
     // all three, which is what makes the columns line up.
     let sp = engrave::system_spacing(&doc, 1..2, Some(music));
-    tablature::render(
-        &doc,
-        &sp,
-        P { x: left, y: 111.0 },
-        false,
-        &mut prims,
-        &mut hits,
-    );
+    tablature::render(&doc, &sp, P { x: left, y: 111.0 }, &mut prims, &mut hits);
     tablature::render_strum(&doc, &sp, P { x: left, y: 104.0 }, &mut prims);
     notation::render(&doc, &sp, P { x: left, y: 87.0 }, &mut prims);
 
-    // Row 3 — tablature alone, so it has to carry the rhythm itself.
+    // Row 3 — chord names over a tablature row with no staff, so the rhythm row
+    // under it carries the rhythm.
     let sp = engrave::system_spacing(&doc, 2..3, Some(music));
-    tablature::render(
-        &doc,
-        &sp,
-        P { x: left, y: 51.0 },
-        true,
-        &mut prims,
-        &mut hits,
-    );
+    tablature::render_chords(&doc, &sp, P { x: left, y: 75.0 }, &mut prims);
+    tablature::render(&doc, &sp, P { x: left, y: 51.0 }, &mut prims, &mut hits);
+    tablature::render_rhythm(&doc, &sp, P { x: left, y: 51.0 }, &mut prims);
 
     // Row 4 — the staff alone, lone flags up and down and a stem stretched to the
     // middle line.
@@ -273,7 +255,7 @@ fn song() -> Document {
     let mut doc = Document::new_empty();
     doc.title = "GRAT".into();
     doc.author = "Nicolas Jalibert".into();
-    doc.model = BlockModel::ThreeLine;
+    doc.rows = vec![Row::Chords, Row::Tab, Row::Strum, Row::Notation];
 
     let riff = |offset: u8, strum: bool| Bar {
         events: (0..8)
@@ -401,4 +383,47 @@ fn shift(p: Prim, dx: f32) -> Prim {
             align,
         },
     }
+}
+
+#[test]
+fn chord_names_are_recognised() {
+    let doc = Document::new_empty();
+    // (string, fret) pairs, string 0 = high E.
+    let name = |frets: &[(u8, u8)]| {
+        let event = Event {
+            notes: frets
+                .iter()
+                .map(|&(string, fret)| Note {
+                    string,
+                    fret,
+                    tech: Technique::Plain,
+                    tie_next: false,
+                })
+                .collect(),
+            ..Event::default()
+        };
+        tablature::chord_name(&doc, &event)
+    };
+    // This binary's only language user; smoke.rs flips the global language.
+    grat::i18n::set_lang("en");
+    assert_eq!(
+        name(&[(4, 3), (3, 2), (2, 0), (1, 1), (0, 0)]).as_deref(),
+        Some("C")
+    );
+    assert_eq!(
+        name(&[(4, 0), (3, 2), (2, 2), (1, 1), (0, 0)]).as_deref(),
+        Some("Am")
+    );
+    assert_eq!(
+        name(&[(5, 0), (4, 2), (3, 0), (2, 1), (1, 0)]).as_deref(),
+        Some("E7")
+    );
+    assert_eq!(name(&[(5, 3), (4, 5)]).as_deref(), Some("G5"));
+    // C major over its third in the bass.
+    assert_eq!(
+        name(&[(5, 0), (4, 3), (3, 2), (2, 0), (1, 1)]).as_deref(),
+        Some("C/E")
+    );
+    assert_eq!(name(&[(0, 3)]), None);
+    assert_eq!(name(&[]), None);
 }

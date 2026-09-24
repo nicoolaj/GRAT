@@ -29,7 +29,11 @@ pub const TICKS_WHOLE: u32 = 3840;
 /// tick count as the old two-field shape, so a v2 file must be refused by an
 /// older build rather than mis-parsed — the `TooNew` path below already does
 /// that, unchanged.
-pub const FORMAT_VERSION: u32 = 2;
+///
+/// v3 replaced the `model` (one/two/three lines) and `staff_order` fields with
+/// `rows`, an ordered list of [`Row`]s; [`Document::from_json`] rewrites the old
+/// pair on load.
+pub const FORMAT_VERSION: u32 = 3;
 
 fn default_format_version() -> u32 {
     1
@@ -400,21 +404,54 @@ impl Bar {
     }
 }
 
-/// How many staff lines (tab / strum / notation) make up one block.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BlockModel {
-    #[default]
-    OneLine,
-    TwoLine,
-    ThreeLine,
+/// One row a block can stack. A document's [`Document::rows`] lists the ones it
+/// shows, top to bottom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Row {
+    /// The six-string staff. Always present: its cells are what the editor clicks.
+    Tab,
+    /// Stems, beams and rests on their own, with no pitch.
+    Rhythm,
+    /// The five-line staff.
+    Notation,
+    /// Strumming direction and tapping marks.
+    Strum,
+    /// Chord names, recognised from each event's notes.
+    Chords,
 }
 
-/// Vertical order of the tab and notation staves within a block.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StaffOrder {
-    #[default]
-    TabFirst,
-    NotationFirst,
+impl Row {
+    /// Every row, in the order the row picker lists the ones not yet shown.
+    pub const ALL: [Row; 5] = [
+        Row::Tab,
+        Row::Rhythm,
+        Row::Notation,
+        Row::Strum,
+        Row::Chords,
+    ];
+}
+
+fn default_rows() -> Vec<Row> {
+    vec![Row::Tab, Row::Rhythm]
+}
+
+fn is_default_rows(v: &[Row]) -> bool {
+    v == default_rows()
+}
+
+/// The v1/v2 `model` + `staff_order` pair, rewritten as a v3 `rows` list: the
+/// one-line model carried its rhythm under the tab, and `NotationFirst` flipped
+/// the stack (it never had anything to flip in a one-line block).
+fn legacy_rows(model: &str, notation_first: bool) -> Vec<Row> {
+    let mut rows = match model {
+        "TwoLine" => vec![Row::Tab, Row::Notation],
+        "ThreeLine" => vec![Row::Tab, Row::Strum, Row::Notation],
+        _ => return default_rows(),
+    };
+    if notation_first {
+        rows.reverse();
+    }
+    rows
 }
 
 /// A complete tablature document.
@@ -457,10 +494,9 @@ pub struct Document {
     /// old number by 0.7, or just set it back to 1.0.
     #[serde(default = "default_scale", skip_serializing_if = "is_unit_scale")]
     pub note_spacing: f32,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub model: BlockModel,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub staff_order: StaffOrder,
+    /// Rows of every block, top to bottom. Always holds [`Row::Tab`].
+    #[serde(default = "default_rows", skip_serializing_if = "is_default_rows")]
+    pub rows: Vec<Row>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub bars: Vec<Bar>,
 }
@@ -513,9 +549,9 @@ impl Document {
     /// v2 needed none, carried instead by `Dur`'s untagged `Deserialize` (reads
     /// both the old `{base, dots}` shape and the new tick count) plus
     /// `#[serde(default)]` on every field v2 stopped writing — see the "Change
-    /// the save format" recipe in CLAUDE.md. When a future bump does need one,
-    /// migrate older JSON up to the current shape between the probe and the
-    /// final parse below.
+    /// the save format" recipe in CLAUDE.md. v2 to v3 does need one: the
+    /// `model`/`staff_order` pair becomes `rows`, rewritten on the raw JSON
+    /// between the probe and the final parse below.
     pub fn from_json(s: &str) -> Result<Document, LoadError> {
         #[derive(Deserialize)]
         struct Probe {
@@ -526,7 +562,24 @@ impl Document {
         if probe.format_version > FORMAT_VERSION {
             return Err(LoadError::TooNew(probe.format_version));
         }
-        serde_json::from_str(s).map_err(|_| LoadError::Parse)
+        let mut json: serde_json::Value = serde_json::from_str(s).map_err(|_| LoadError::Parse)?;
+        if probe.format_version < 3 {
+            if let Some(obj) = json.as_object_mut() {
+                let model = obj.remove("model");
+                let order = obj.remove("staff_order");
+                let rows = legacy_rows(
+                    model.as_ref().and_then(|v| v.as_str()).unwrap_or("OneLine"),
+                    order.as_ref().and_then(|v| v.as_str()) == Some("NotationFirst"),
+                );
+                obj.insert("rows".into(), serde_json::to_value(rows).unwrap());
+            }
+        }
+        let mut doc: Document = serde_json::from_value(json).map_err(|_| LoadError::Parse)?;
+        // A hand-edited file could drop the tab; without it nothing is clickable.
+        if !doc.rows.contains(&Row::Tab) {
+            doc.rows.insert(0, Row::Tab);
+        }
+        Ok(doc)
     }
 
     /// Serialise this document the way every `.gtab` is written: pretty-printed
@@ -567,8 +620,7 @@ impl Document {
             tempo: default_tempo(),
             tab_scale: default_scale(),
             note_spacing: default_scale(),
-            model: BlockModel::default(),
-            staff_order: StaffOrder::default(),
+            rows: default_rows(),
             bars,
         }
     }

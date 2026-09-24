@@ -46,7 +46,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `engrave.rs` | rhythm only: beat grouping, beams, proportional spacing, justification, and the print normalisation (`for_export`: merge rests, split notes straddling a beat into tied pieces). No pitch, no glyphs |
 | `staff.rs` | furniture both rows share: barlines and repeats, rests, arrowheads, waves, text metrics |
 | `notation.rs` | the five-line staff: clef, heads, stems, beams, accidentals, ties, ledger lines |
-| `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs, strum row, rhythm stems |
+| `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs; and the strum, rhythm and chord-name rows (chord recognition included) |
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, hit boxes |
 | `decorations.rs` | calendar decorations for the logo (confetti, flags, pumpkins...): the date → `Decoration` table, its shape vocabulary, and `bake`, the pixel rasterizer that stamps one into the dock/taskbar icon's raw RGBA. GUI-free like the rest of the library; its live, on-screen counterpart is `canvas::paint_decoration` |
 | `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette, and the live rendering of a `decorations::Decoration` (`paint_decoration`) |
@@ -68,7 +68,8 @@ never know about pages, egui or PDF.
 3. **`origin` means the first barline.** For every row renderer, `origin.x` is where the music
    starts and the staff head (the "TAB" letters, the clef, the time signature) is drawn by the
    renderer itself in `[origin.x - HEAD_MM, origin.x]`. The layout reserves that room.
-   `origin.y` is the bottom string line / bottom staff line / strum baseline.
+   `origin.y` is the bottom string line / bottom staff line / strum or chord-name baseline — except
+   the rhythm row, whose stems hang from `origin.y`, its top edge.
 4. **`Prim` order is paint order.** The tablature row knocks the string line out behind each fret
    number with a paper-coloured quad, so a row's primitives must be emitted contiguously.
 5. **No user-facing English literal outside `src/i18n/*.json`.** Not in `main.rs`, not in
@@ -139,7 +140,7 @@ never know about pages, egui or PDF.
   `log show` pinpointing the abort to the exact instant AppKit dispatched the click). 0.19.3 is the
   newest release (checked crates.io); no fix exists to upgrade to. `PredefinedMenuItem`-based items
   (Hide, Minimize, Close, Quit, etc.) don't go through that code path and were not observed to
-  crash, but the app's own actions (New, Open, Save, Undo, switching the block model...) all need
+  crash, but the app's own actions (New, Open, Save, Undo, switching block rows...) all need
   custom items, which is most of the menu. Reverted to `egui::Panel::top` + `egui::MenuBar` on every
   platform, including macOS — see `TablaturesApp::egui_menu_bar` in `main.rs`.
 - **`rodio 0.22` (the live-mode metronome click) is macOS/Windows only — do not add it back as a
@@ -185,9 +186,11 @@ sheet.
 **Add a language.** Drop `src/i18n/xx.json` next to the others and add one line to
 `i18n::LANGS`. Missing keys fall back to English, so a partial file is safe to ship.
 
-**Add a block model.** Extend `model::BlockModel`, then handle it in `layout.rs` (block height and
-row stacking) and in `tablature::shows_rhythm` — a block with no notation staff must carry its own
-rhythm stems, or it says which frets to play but never when.
+**Add a block row.** A block is `Document::rows`, an ordered list of `model::Row` the user ticks and
+reorders from the Rows menu. Add the variant to `Row` and `Row::ALL`, a renderer taking the shared
+`&Spacing` (invariant 1), its footprint in `layout::row_extent` and its arm in `layout::place_block`,
+a `row.*` label and a `help.row_*_desc` key in both language files, and its arm in `main.rs`'s
+`row_label` and help list. `Row::Tab` is always present: its cells are all the editor can click.
 
 **Add a calendar decoration.** Add a `(month, day)` arm to `decorations::decoration_for` and a
 shape-builder function returning a `Decoration` — reuse `flag_bands`/`firework`/`star`/`square`/

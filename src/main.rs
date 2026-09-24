@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use eframe::egui;
 use grat::i18n::{self, t};
-use grat::model::{technique_color, BlockModel, Document, LoadError, StaffOrder, Technique};
+use grat::model::{technique_color, Document, LoadError, Row, Technique};
 
 const SHORTCUT_NEW: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
@@ -817,38 +817,15 @@ impl TablaturesApp {
                     self.layout_dirty = true;
                 }
                 ui.separator();
-                egui::ComboBox::from_id_salt("block_model")
-                    .selected_text(model_label(self.doc.model))
-                    .show_ui(ui, |ui| {
-                        for m in [
-                            BlockModel::OneLine,
-                            BlockModel::TwoLine,
-                            BlockModel::ThreeLine,
-                        ] {
-                            if ui
-                                .selectable_value(&mut self.doc.model, m, model_label(m))
-                                .changed()
-                            {
-                                self.dirty = true;
-                                self.layout_dirty = true;
-                            }
-                        }
-                    });
-                egui::ComboBox::from_id_salt("staff_order")
-                    .selected_text(staff_order_label(self.doc.staff_order))
-                    .show_ui(ui, |ui| {
-                        for o in [StaffOrder::TabFirst, StaffOrder::NotationFirst] {
-                            if ui
-                                .selectable_value(
-                                    &mut self.doc.staff_order,
-                                    o,
-                                    staff_order_label(o),
-                                )
-                                .changed()
-                            {
-                                self.dirty = true;
-                                self.layout_dirty = true;
-                            }
+                egui::containers::menu::MenuButton::new(t("rows.menu"))
+                    .config(
+                        egui::containers::menu::MenuConfig::new()
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                    )
+                    .ui(ui, |ui| {
+                        if rows_editor(ui, &mut self.doc.rows) {
+                            self.dirty = true;
+                            self.layout_dirty = true;
                         }
                     });
             });
@@ -891,19 +868,54 @@ impl TablaturesApp {
     }
 }
 
-fn model_label(model: BlockModel) -> String {
-    match model {
-        BlockModel::OneLine => t("model.one_line"),
-        BlockModel::TwoLine => t("model.two_line"),
-        BlockModel::ThreeLine => t("model.three_line"),
+/// The block's rows: the shown ones in order, each with a checkbox and up/down
+/// arrows, then the hidden ones, which a tick appends at the bottom. The tab
+/// cannot be unticked — its cells are what the editor clicks. True on any change.
+fn rows_editor(ui: &mut egui::Ui, rows: &mut Vec<Row>) -> bool {
+    let mut changed = false;
+    let hidden: Vec<Row> = Row::ALL.into_iter().filter(|r| !rows.contains(r)).collect();
+    let shown = rows.len();
+    for (i, row) in rows.clone().into_iter().chain(hidden).enumerate() {
+        ui.horizontal(|ui| {
+            let mut on = i < shown;
+            let tick = ui.add_enabled(
+                row != Row::Tab,
+                egui::Checkbox::new(&mut on, row_label(row)),
+            );
+            if tick.changed() {
+                if on {
+                    rows.push(row);
+                } else {
+                    rows.retain(|&r| r != row);
+                }
+                changed = true;
+            }
+            if i < shown {
+                if ui.add_enabled(i > 0, egui::Button::new("⬆")).clicked() {
+                    rows.swap(i, i - 1);
+                    changed = true;
+                }
+                if ui
+                    .add_enabled(i + 1 < shown, egui::Button::new("⬇"))
+                    .clicked()
+                {
+                    rows.swap(i, i + 1);
+                    changed = true;
+                }
+            }
+        });
     }
+    changed
 }
 
-fn staff_order_label(order: StaffOrder) -> String {
-    match order {
-        StaffOrder::TabFirst => t("staff_order.tab_first"),
-        StaffOrder::NotationFirst => t("staff_order.notation_first"),
-    }
+fn row_label(row: Row) -> String {
+    t(match row {
+        Row::Tab => "row.tab",
+        Row::Rhythm => "row.rhythm",
+        Row::Notation => "row.notation",
+        Row::Strum => "row.strum",
+        Row::Chords => "row.chords",
+    })
 }
 
 impl eframe::App for TablaturesApp {
@@ -1052,7 +1064,7 @@ impl eframe::App for TablaturesApp {
 
         // Help: the legend of technique colours -- the single most useful thing on
         // this page, since the colours ARE the notation and nothing else explains
-        // them -- plus the shortcuts, the block models, and the per-event/per-bar
+        // them -- plus the shortcuts, the block rows, and the per-event/per-bar
         // spans (palm mute, let ring, repeats).
         egui::Window::new(t("menu.help"))
             .id(egui::Id::new("help_window"))
@@ -1114,22 +1126,17 @@ impl eframe::App for TablaturesApp {
 
                 ui.add_space(8.0);
                 ui.separator();
-                ui.heading(t("help.models_title"));
-                ui.label(format!(
-                    "{} — {}",
-                    t("model.one_line"),
-                    t("help.model_one_desc")
-                ));
-                ui.label(format!(
-                    "{} — {}",
-                    t("model.two_line"),
-                    t("help.model_two_desc")
-                ));
-                ui.label(format!(
-                    "{} — {}",
-                    t("model.three_line"),
-                    t("help.model_three_desc")
-                ));
+                ui.heading(t("help.rows_title"));
+                ui.label(t("help.rows_body"));
+                for (row, key) in [
+                    (Row::Tab, "help.row_tab_desc"),
+                    (Row::Rhythm, "help.row_rhythm_desc"),
+                    (Row::Notation, "help.row_notation_desc"),
+                    (Row::Strum, "help.row_strum_desc"),
+                    (Row::Chords, "help.row_chords_desc"),
+                ] {
+                    ui.label(format!("{} — {}", row_label(row), t(key)));
+                }
 
                 ui.add_space(8.0);
                 ui.separator();

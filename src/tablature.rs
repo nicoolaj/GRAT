@@ -1,5 +1,5 @@
 //! Tablature row: six string lines, fret numbers, every playing-technique glyph,
-//! the strum/tapping row, and the rhythm stems.
+//! the strum/tapping row, the rhythm row and the chord-name row.
 //!
 //! Drawn geometrically in page millimetres, like [`crate::notation`], so screen and
 //! PDF agree exactly. The horizontal positions come from [`crate::engrave`] — the
@@ -7,7 +7,7 @@
 //! strum arrow and its note head line up in one vertical column.
 
 use crate::engrave::{beam_groups, beam_run_span, beam_runs, Spacing};
-use crate::model::{technique_color, Bar, Document, Note, NoteValue, Strum, Technique};
+use crate::model::{technique_color, Bar, Document, Event, Note, NoteValue, Strum, Technique};
 use crate::staff::{
     arc, arrow_head, barline, dashed, ellipse, label_width, pt_for_cap, quad, wave, Barline, FAINT,
     INK, PAPER,
@@ -26,9 +26,11 @@ pub const STAFF_MM: f32 = 5.0 * STRING_MM;
 /// `BLOCK_GAP_MM` between stacked blocks. Grow `BAND_MM` with `tab_scale` if that
 /// ever shows.
 pub const BAND_MM: f32 = 8.0;
-/// Band below the staff: stems and beams, when the block shows rhythm.
+/// Height of the rhythm row: stems and beams with no pitch.
 pub const RHYTHM_MM: f32 = 8.0;
-/// Height of the strumming / tapping row of a three-row block.
+/// Height of the chord-name row.
+pub const CHORD_MM: f32 = 5.0;
+/// Height of the strumming / tapping row.
 pub const STRUM_MM: f32 = 5.5;
 /// Room reserved at the left of the system for the "TAB" label.
 pub const HEAD_MM: f32 = 13.0;
@@ -51,12 +53,6 @@ const SCALE_BASE: f32 = 1.3;
 /// The multiplier the renderer applies for this document.
 fn scale(doc: &Document) -> f32 {
     doc.tab_scale * SCALE_BASE
-}
-
-/// A tablature row shows the rhythm itself when no notation staff is there to
-/// carry it — otherwise the block would say which frets to play but never when.
-pub fn shows_rhythm(doc: &Document) -> bool {
-    matches!(doc.model, crate::model::BlockModel::OneLine)
 }
 
 /// A clickable cell: one string at one event. The editor turns a mouse position
@@ -107,7 +103,6 @@ pub fn render(
     doc: &Document,
     spacing: &Spacing,
     origin: P,
-    show_rhythm: bool,
     out: &mut Vec<Prim>,
     hits: &mut Vec<Hit>,
 ) {
@@ -164,9 +159,6 @@ pub fn render(
         render_bar(doc, spacing, i, origin, out, hits);
     }
     spans(doc, spacing, origin, out);
-    if show_rhythm {
-        rhythm(doc, spacing, origin, out);
-    }
 }
 
 /// The stacked "TAB" that opens a tablature staff, centred on the staff mid-line.
@@ -721,10 +713,13 @@ fn spans(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
     }
 }
 
-/// Stems and beams under the staff. A tablature row that has no notation staff
-/// beside it must carry the rhythm itself, or the block says which frets to play
-/// but never when.
-fn rhythm(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
+/// The rhythm row: stems, beams and rests with no pitch. A block with no notation
+/// staff needs it, or it says which frets to play but never when.
+///
+/// `origin` is the first barline: x of the music start, y of the row's TOP edge
+/// — the stems hang from it, so under a tablature row they sit right below the
+/// low string.
+pub fn render_rhythm(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
     let top = origin.y - 1.4;
     let base = origin.y - RHYTHM_MM + 2.4;
     const BEAM_H: f32 = 0.65;
@@ -837,7 +832,7 @@ fn rhythm(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
     }
 }
 
-/// The strumming and tapping row of a three-row block.
+/// The strumming and tapping row.
 ///
 /// `origin` is the first barline: x of the music start, y of the row's baseline.
 pub fn render_strum(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
@@ -898,4 +893,95 @@ pub fn render_strum(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<
             }
         }
     }
+}
+
+/// The chord-name row: a name over each event whose notes spell a different
+/// chord from the last one named on this system.
+///
+/// `origin` is the first barline: x of the music start, y of the row's baseline.
+pub fn render_chords(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
+    let mut last = None;
+    for b in &spacing.bars {
+        let Some(bar) = doc.bars.get(b.index) else {
+            continue;
+        };
+        for (ei, event) in bar.events.iter().enumerate() {
+            let (Some(&ex), Some(name)) = (b.events.get(ei), chord_name(doc, event)) else {
+                continue;
+            };
+            if last.as_ref() == Some(&name) {
+                continue;
+            }
+            out.push(Prim::Text {
+                pos: P {
+                    x: origin.x + ex,
+                    y: origin.y + 1.0,
+                },
+                s: name.clone(),
+                pt: pt_for_cap(2.8),
+                color: INK,
+                align: Align::Center,
+            });
+            last = Some(name);
+        }
+    }
+}
+
+/// Chord shapes as (intervals above the root, suffix). Matched exactly against
+/// the pitch classes sounding, so a doubled note never matters but an extra one
+/// does.
+///
+/// ponytail: a fixed table of common triads and sevenths; extended chords
+/// (9ths, 11ths, 13ths) go unnamed. Add rows here when someone writes one.
+const CHORDS: &[(&[u8], &str)] = &[
+    (&[0, 4, 7], ""),
+    (&[0, 3, 7], "m"),
+    (&[0, 4, 7, 10], "7"),
+    (&[0, 4, 10], "7"),
+    (&[0, 4, 7, 11], "maj7"),
+    (&[0, 4, 11], "maj7"),
+    (&[0, 3, 7, 10], "m7"),
+    (&[0, 3, 10], "m7"),
+    (&[0, 4, 7, 9], "6"),
+    (&[0, 3, 7, 9], "m6"),
+    (&[0, 2, 4, 7], "add9"),
+    (&[0, 2, 7], "sus2"),
+    (&[0, 5, 7], "sus4"),
+    (&[0, 5, 7, 10], "7sus4"),
+    (&[0, 3, 6], "dim"),
+    (&[0, 3, 6, 9], "dim7"),
+    (&[0, 3, 6, 10], "m7b5"),
+    (&[0, 4, 8], "aug"),
+    (&[0, 7], "5"),
+];
+
+/// The chord `event` spells, e.g. "Am", "G/B", "Lam" in French — or `None` for
+/// a rest, a single note, or a set of notes no row of [`CHORDS`] matches. Dead
+/// notes have no pitch and are left out. Among the notes, the lowest decides the
+/// root when it can be one, and becomes the bass of a slash chord otherwise.
+pub fn chord_name(doc: &Document, event: &Event) -> Option<String> {
+    let mut pitches: Vec<u8> = event
+        .notes
+        .iter()
+        .filter(|n| !matches!(n.tech, Technique::Dead))
+        .map(|n| doc.pitch(n))
+        .collect();
+    pitches.sort_unstable();
+    let bass = *pitches.first()? % 12;
+    let mut classes: Vec<u8> = pitches.iter().map(|p| p % 12).collect();
+    classes.sort_unstable();
+    classes.dedup();
+    let mut roots = classes.clone();
+    roots.sort_by_key(|&r| r != bass);
+    roots.into_iter().find_map(|root| {
+        let mut shape: Vec<u8> = classes.iter().map(|c| (c + 12 - root) % 12).collect();
+        shape.sort_unstable();
+        let (_, suffix) = CHORDS.iter().find(|(s, _)| *s == shape.as_slice())?;
+        let name = format!("{}{}", crate::i18n::pitch_name(root), suffix);
+        Some(if root == bass {
+            name
+        } else {
+            format!("{}/{}", name, crate::i18n::pitch_name(bass))
+        })
+    })
 }

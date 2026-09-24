@@ -11,7 +11,7 @@ use std::ops::Range;
 
 use crate::engrave::{self, Spacing};
 use crate::i18n;
-use crate::model::{Bar, BlockModel, Document, StaffOrder};
+use crate::model::{Bar, Document, Row};
 use crate::notation;
 use crate::staff::{self, FAINT, INK};
 use crate::tablature;
@@ -324,24 +324,6 @@ fn footer(page_no: usize, total: usize, out: &mut Vec<Prim>) {
     });
 }
 
-/// Which rows make up one block, top to bottom, in [`StaffOrder::TabFirst`] order.
-/// [`StaffOrder::NotationFirst`] is the very same list reversed: the strum row
-/// (when present) is symmetric in the middle, so reversing is all the swap needs.
-#[derive(Clone, Copy)]
-enum RowKind {
-    Tab,
-    Strum,
-    Notation,
-}
-
-fn row_kinds(model: BlockModel) -> Vec<RowKind> {
-    match model {
-        BlockModel::OneLine => vec![RowKind::Tab],
-        BlockModel::TwoLine => vec![RowKind::Tab, RowKind::Notation],
-        BlockModel::ThreeLine => vec![RowKind::Tab, RowKind::Strum, RowKind::Notation],
-    }
-}
-
 /// Footprint of one row as (height above its own origin, height below it) — this
 /// mirrors the origin-semantics doc comments on `tablature::render`,
 /// `tablature::render_strum` and `notation::render` exactly, so the block-height
@@ -350,18 +332,13 @@ fn row_kinds(model: BlockModel) -> Vec<RowKind> {
 ///
 /// `half_range` is the notation row's actual pitch extent for this system (see
 /// [`notation::half_range`]); the other rows ignore it.
-fn row_extent(kind: RowKind, show_rhythm: bool, half_range: (i32, i32)) -> (f32, f32) {
-    match kind {
-        RowKind::Tab => (
-            tablature::STAFF_MM + tablature::BAND_MM,
-            if show_rhythm {
-                tablature::RHYTHM_MM
-            } else {
-                0.0
-            },
-        ),
-        RowKind::Strum => (tablature::STRUM_MM, 0.0),
-        RowKind::Notation => notation::row_extent(half_range),
+fn row_extent(row: Row, half_range: (i32, i32)) -> (f32, f32) {
+    match row {
+        Row::Tab => (tablature::STAFF_MM + tablature::BAND_MM, 0.0),
+        Row::Rhythm => (0.0, tablature::RHYTHM_MM),
+        Row::Strum => (tablature::STRUM_MM, 0.0),
+        Row::Chords => (tablature::CHORD_MM, 0.0),
+        Row::Notation => notation::row_extent(half_range),
     }
 }
 
@@ -370,19 +347,17 @@ fn row_extent(kind: RowKind, show_rhythm: bool, half_range: (i32, i32)) -> (f32,
 /// [`notation::half_range`]), so this must be recomputed per system rather than
 /// once for the whole document.
 fn block_height(doc: &Document, bars: Range<usize>) -> f32 {
-    let show_rhythm = tablature::shows_rhythm(doc);
     let half_range = notation::half_range(doc, bars);
-    row_kinds(doc.model)
+    doc.rows
         .iter()
-        .map(|&k| {
-            let (above, below) = row_extent(k, show_rhythm, half_range);
+        .map(|&r| {
+            let (above, below) = row_extent(r, half_range);
             above + below
         })
         .sum()
 }
 
-/// Render one block (tablature, optionally strum, optionally notation, in the
-/// document's [`StaffOrder`]) from a single shared [`Spacing`] — the whole point
+/// Render one block (the document's [`Document::rows`], top to bottom) from a single shared [`Spacing`] — the whole point
 /// being that a fret number, its strum arrow and its note head land in the same
 /// column — stacked with no gap between rows: each row's own band/ledger padding
 /// already reads as the gap.
@@ -394,30 +369,26 @@ fn place_block(
     out: &mut Vec<Prim>,
     hits: &mut Vec<tablature::Hit>,
 ) {
-    let show_rhythm = tablature::shows_rhythm(doc);
     let half_range = match (spacing.bars.first(), spacing.bars.last()) {
         (Some(first), Some(last)) => notation::half_range(doc, first.index..last.index + 1),
         _ => (0, 8),
     };
-    let mut order = row_kinds(doc.model);
-    if matches!(doc.staff_order, StaffOrder::NotationFirst) {
-        order.reverse();
-    }
-
     let mut cursor = top;
     let mut tab_origin_y = None;
-    for kind in order {
-        let (above, below) = row_extent(kind, show_rhythm, half_range);
+    for &row in &doc.rows {
+        let (above, below) = row_extent(row, half_range);
         let origin_y = cursor - above;
         cursor = origin_y - below;
         let origin = P::new(x, origin_y);
-        match kind {
-            RowKind::Tab => {
-                tablature::render(doc, spacing, origin, show_rhythm, out, hits);
+        match row {
+            Row::Tab => {
+                tablature::render(doc, spacing, origin, out, hits);
                 tab_origin_y = Some(origin_y);
             }
-            RowKind::Strum => tablature::render_strum(doc, spacing, origin, out),
-            RowKind::Notation => notation::render(doc, spacing, origin, out),
+            Row::Rhythm => tablature::render_rhythm(doc, spacing, origin, out),
+            Row::Strum => tablature::render_strum(doc, spacing, origin, out),
+            Row::Chords => tablature::render_chords(doc, spacing, origin, out),
+            Row::Notation => notation::render(doc, spacing, origin, out),
         }
     }
 

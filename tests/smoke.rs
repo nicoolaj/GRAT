@@ -1,8 +1,8 @@
 //! Integration tests against the public `tablatures` crate API.
 
 use grat::model::{
-    Bar, BlockModel, Document, Dur, Event, LoadError, Note, NoteValue, StaffOrder, Strum,
-    Technique, FORMAT_VERSION, MAX_DOTS,
+    Bar, Document, Dur, Event, LoadError, Note, NoteValue, Row, Strum, Technique, FORMAT_VERSION,
+    MAX_DOTS,
 };
 use grat::{engrave, i18n, layout, pdf};
 
@@ -148,6 +148,30 @@ fn from_json_versions_the_format() {
     assert_eq!(Document::from_json("not json"), Err(LoadError::Parse));
 }
 
+#[test]
+fn v2_block_model_migrates_to_rows() {
+    let rows = |json: &str| Document::from_json(json).unwrap().rows;
+    assert_eq!(rows(r#"{"format_version": 2}"#), [Row::Tab, Row::Rhythm]);
+    assert_eq!(
+        rows(r#"{"format_version": 2, "model": "TwoLine", "staff_order": "NotationFirst"}"#),
+        [Row::Notation, Row::Tab]
+    );
+    assert_eq!(
+        rows(r#"{"model": "ThreeLine"}"#),
+        [Row::Tab, Row::Strum, Row::Notation]
+    );
+    // A v3 file keeps its own order, and one missing the tab gets it back.
+    assert_eq!(
+        rows(r#"{"format_version": 3, "rows": ["Chords", "Notation"]}"#),
+        [Row::Tab, Row::Chords, Row::Notation]
+    );
+    // The default rows are not written; any other choice round-trips.
+    let mut doc = Document::new_empty();
+    assert!(!doc.to_json().unwrap().contains("\"rows\""));
+    doc.rows = vec![Row::Notation, Row::Chords, Row::Tab];
+    assert_eq!(rows(&doc.to_json().unwrap()), doc.rows);
+}
+
 const V1_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v1.gtab");
 
 #[test]
@@ -166,8 +190,7 @@ fn v1_fixture_loads_as_the_expected_document() {
         tempo: 120,
         tab_scale: 1.0,
         note_spacing: 1.0,
-        model: BlockModel::OneLine,
-        staff_order: StaffOrder::TabFirst,
+        rows: vec![Row::Tab, Row::Rhythm],
         bars: vec![Bar {
             events: vec![
                 Event {
@@ -325,10 +348,13 @@ fn t_resolves_known_keys_per_language_and_falls_back_for_unknown_keys() {
     assert_eq!(unknown, "this.key.does.not.exist");
 }
 
-/// `n` identical bars of four quarter notes each, in the given block model.
-fn doc_of_bars(n: usize, model: BlockModel) -> Document {
+const ONE: &[Row] = &[Row::Tab, Row::Rhythm];
+const THREE: &[Row] = &[Row::Tab, Row::Strum, Row::Notation];
+
+/// `n` identical bars of four quarter notes each, with the given block rows.
+fn doc_of_bars(n: usize, rows: &[Row]) -> Document {
     let mut doc = Document::new_empty();
-    doc.model = model;
+    doc.rows = rows.to_vec();
     doc.bars = (0..n)
         .map(|i| Bar {
             events: (0..4)
@@ -357,12 +383,12 @@ fn doc_of_bars(n: usize, model: BlockModel) -> Document {
 #[test]
 fn paginate_fits_expected_number_of_pages_for_n_bars() {
     // A handful of bars is well within one page...
-    let small = layout::paginate(&doc_of_bars(6, BlockModel::ThreeLine));
+    let small = layout::paginate(&doc_of_bars(6, THREE));
     assert_eq!(small.len(), 1, "a handful of bars fits on one page");
 
     // ...while a large enough count is guaranteed to spill onto more than one,
     // regardless of the exact margin/title-block constants layout.rs tunes.
-    let large = layout::paginate(&doc_of_bars(200, BlockModel::ThreeLine));
+    let large = layout::paginate(&doc_of_bars(200, THREE));
     assert!(
         large.len() > 1,
         "200 bars must not fit on a single A4 page, got {} page(s)",
@@ -417,8 +443,8 @@ fn page_count_grows_from_one_line_to_three_line() {
     // strictly more pages than OneLine's shorter one (tab alone), for the exact
     // same music — the whole reason a block's height is computed per model.
     let bars = 120;
-    let one = layout::paginate(&doc_of_bars(bars, BlockModel::OneLine));
-    let three = layout::paginate(&doc_of_bars(bars, BlockModel::ThreeLine));
+    let one = layout::paginate(&doc_of_bars(bars, ONE));
+    let three = layout::paginate(&doc_of_bars(bars, THREE));
     assert!(
         three.len() > one.len(),
         "ThreeLine ({} pages) should need more pages than OneLine ({} pages)",
@@ -429,7 +455,7 @@ fn page_count_grows_from_one_line_to_three_line() {
 
 #[test]
 fn denser_note_spacing_shrinks_the_system_and_fits_more_pages() {
-    let mut doc = doc_of_bars(60, BlockModel::OneLine);
+    let mut doc = doc_of_bars(60, ONE);
 
     // The natural (unjustified) system width scales linearly with note_spacing.
     doc.note_spacing = 1.0;
@@ -460,7 +486,7 @@ fn identical_bars_get_identical_widths_across_systems() {
     // make the systems break unevenly -- that is exactly the situation where
     // per-system justification used to stretch one line harder than the next and
     // pull the barlines of identical music out of column.
-    let mut doc = doc_of_bars(24, BlockModel::OneLine);
+    let mut doc = doc_of_bars(24, ONE);
     doc.bars[9].events = vec![Event {
         dur: Dur {
             base: NoteValue::Whole,
@@ -507,7 +533,7 @@ fn identical_bars_get_identical_widths_across_systems() {
 
 #[test]
 fn tab_scale_grows_the_fret_numbers_but_not_the_grid() {
-    let mut doc = doc_of_bars(6, BlockModel::OneLine);
+    let mut doc = doc_of_bars(6, ONE);
 
     // doc_of_bars frets everything at 2, so a "2" text prim is a fret number.
     let fret_pt = |d: &Document| -> f32 {
@@ -565,7 +591,7 @@ fn tab_scale_grows_the_fret_numbers_but_not_the_grid() {
 
 #[test]
 fn every_hit_is_non_empty_and_stays_on_the_page() {
-    let pages = layout::paginate(&doc_of_bars(40, BlockModel::ThreeLine));
+    let pages = layout::paginate(&doc_of_bars(40, THREE));
     assert!(!pages.is_empty());
     let mut total_hits = 0;
     for page in &pages {
@@ -609,7 +635,7 @@ fn an_empty_document_still_produces_one_furnished_page() {
 
 #[test]
 fn pdf_export_starts_with_the_pdf_header() {
-    let bytes = pdf::export(&doc_of_bars(4, BlockModel::OneLine));
+    let bytes = pdf::export(&doc_of_bars(4, ONE));
     assert!(
         bytes.starts_with(b"%PDF-"),
         "exported bytes must start with the %PDF- header"
@@ -622,9 +648,9 @@ fn pdf_export_page_count_matches_a_two_page_layout() {
     // hardcoding one -- keeps the test from going stale if layout.rs's
     // pagination constants ever move.
     let bars = (1..=300)
-        .find(|&n| layout::paginate(&doc_of_bars(n, BlockModel::OneLine)).len() == 2)
+        .find(|&n| layout::paginate(&doc_of_bars(n, ONE)).len() == 2)
         .expect("some bar count must yield exactly two pages");
-    let doc = doc_of_bars(bars, BlockModel::OneLine);
+    let doc = doc_of_bars(bars, ONE);
     assert_eq!(layout::paginate(&doc).len(), 2, "fixture must be two pages");
 
     let bytes = pdf::export(&doc);
@@ -855,7 +881,7 @@ fn for_export_leaves_a_three_four_rest_run_as_two_quarter_rests() {
 
 #[test]
 fn for_export_is_idempotent() {
-    let mut doc = doc_of_bars(6, BlockModel::OneLine);
+    let mut doc = doc_of_bars(6, ONE);
     doc.bars[2].events = vec![
         q_note(0),
         beat_rest(NoteValue::Eighth),
@@ -873,7 +899,7 @@ fn for_export_is_idempotent() {
 fn pdf_export_does_not_print_trailing_blank_bars() {
     // One page of music, then enough blank bars to fill more pages on their own.
     // The blank tail must never reach the paper.
-    let mut doc = doc_of_bars(6, BlockModel::OneLine);
+    let mut doc = doc_of_bars(6, ONE);
     assert_eq!(
         layout::paginate(&doc).len(),
         1,

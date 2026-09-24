@@ -1,4 +1,4 @@
-//! Standard-notation engraving: the five-line staff of a two- or three-row block.
+//! Standard-notation engraving: the five-line staff row of a block.
 //!
 //! Takes the rhythmic decisions from [`crate::engrave`] and the pitches from the
 //! document, and emits [`Prim`]s in page millimetres. Everything is drawn
