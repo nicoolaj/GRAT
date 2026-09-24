@@ -20,14 +20,15 @@ pub const SPACE_MM: f32 = 2.5;
 /// Vertical room the notation row needs: the staff plus the usual ledger territory.
 /// This is the floor `row_extent` never shrinks below, not the room a system with
 /// tall ledger lines actually gets.
-pub const ROW_MM: f32 = 20.0;
+pub const ROW_MM: f32 = 21.0;
 /// Where the bottom staff line sits inside that row.
 pub const BASELINE_OFFSET_MM: f32 = 7.0;
 
 /// Breathing room kept beyond the highest/lowest note's ledger line. Chosen so
 /// `row_extent` reproduces `ROW_MM`/`BASELINE_OFFSET_MM` exactly for a system that
-/// never leaves the staff (half_range == (0, 8)): `8 * 0.5 * SPACE_MM + 3.0 == 13.0`.
-const LEDGER_BREATH_MM: f32 = 3.0;
+/// never leaves the staff (half_range == (0, 8)): `8 * 0.5 * SPACE_MM + 4.0 == 14.0`.
+/// 14 mm is also what the G clef's head needs, a space and a half over the staff.
+const LEDGER_BREATH_MM: f32 = 4.0;
 
 /// Highest and lowest half-space (see [`staff_position`]) any note in `bars`
 /// reaches, floored to the plain staff `(0, 8)` so a system with no notes — or an
@@ -822,9 +823,10 @@ fn time_signature(x: f32, y0: f32, sp: f32, sig: (u8, u8), out: &mut Vec<Prim>) 
 /// line, its radius `r = R0 + (R - R0)·(2u - u²)` in the fraction `u` of the way
 /// round — opening evenly, then easing to a constant so the last half turn is the
 /// round outer loop and the upstroke leaves it tangentially at the left. The rest
-/// of the glyph is a spline through points measured off a classic engraved clef,
-/// with its apex squashed a tenth so the glyph stays inside the 13 mm the row
-/// reserves above its baseline.
+/// of the glyph is a spline through points measured off a classic engraved clef:
+/// the belly crosses the stem just above the third line, and the head is a narrow,
+/// pointed loop standing about a space and a half over the staff — the reason the
+/// row reserves 14 mm above its baseline.
 ///
 /// ponytail: a procedural G clef rather than a real glyph outline. It reads
 /// correctly at print size; embed a music font if it ever has to be exact.
@@ -840,20 +842,20 @@ fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
     // (x, y, width) from the spiral's end: a Catmull-Rom spline runs through them.
     const PATH: [[f32; 3]; 24] = [
         [-1.05, 0.00, 0.22],
-        [-1.06, 0.60, 0.35], // the thick left side rising into the upstroke
-        [-0.84, 1.00, 0.42],
-        [-0.51, 1.40, 0.46],
-        [-0.10, 1.80, 0.50], // crosses the stem on the fourth line
-        [0.32, 2.18, 0.45],
-        [0.64, 2.54, 0.37],
-        [0.80, 2.90, 0.25],
-        [0.87, 3.26, 0.15],
-        [0.78, 3.62, 0.30],
-        [0.50, 3.84, 0.45], // the apex
-        [0.22, 3.62, 0.35],
-        [0.12, 3.26, 0.27],
-        [0.07, 2.90, 0.18],
-        [0.08, 2.54, 0.12],
+        [-1.04, 0.50, 0.35], // the thick left side rising into the upstroke
+        [-0.80, 0.92, 0.42],
+        [-0.40, 1.25, 0.46],
+        [0.21, 1.52, 0.50], // crosses the stem just above the third line
+        [0.52, 1.90, 0.45],
+        [0.72, 2.35, 0.37],
+        [0.80, 2.85, 0.26],
+        [0.76, 3.35, 0.16],
+        [0.62, 3.80, 0.24],
+        [0.42, 4.18, 0.40], // the apex, a space and a half over the top line
+        [0.24, 3.95, 0.32],
+        [0.14, 3.50, 0.24],
+        [0.09, 3.00, 0.16],
+        [0.09, 2.50, 0.12],
         [0.16, 1.90, 0.13], // the stem, leaning like a pen stroke
         [0.27, 1.00, 0.13],
         [0.38, 0.00, 0.13],
