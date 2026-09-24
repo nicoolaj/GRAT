@@ -4,6 +4,31 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.0.0] — 2026-09-24
+
+### Ajouté
+- Menu **Édition** : choix de l'**instrument** (guitare, basse, ukulélé, guitare baryton, ukulélé
+  baryton, banjo 5 cordes, mandoline), du **nombre de cordes** (guitare 6/7/8, basse 4/5/6), d'un
+  **accordage** parmi les standards de l'instrument (Drop D, Open G, DADGAD, ukulélé Sol grave…),
+  ou d'un **accordage personnalisé** corde par corde.
+- Au changement d'accordage, choix entre **garder les frettes** (la tablature reste telle quelle)
+  et **garder les hauteurs** (chaque note est re-frettée pour sonner pareil). Annulable.
+- **Afficher l'accordage** : nulle part, sur une ligne sous le titre, ou au début de chaque corde,
+  en noms de notes (Mi La Ré…) ou en lettres (E A D…).
+
+### Modifié
+- La tablature dessine une ligne par corde ; les points de reprise, « TAB » et la signature
+  rythmique s'adaptent à la hauteur de la portée.
+- La portée prend la clé de l'instrument : sol 8vb (guitares, banjo, ukulélé baryton), sol
+  (ukulélé, mandoline), fa 8vb (basse, nouvelle clé de fa dessinée).
+- Les noms d'accords suivent l'accordage ; sur un accordage rentrant (Sol aigu du ukulélé,
+  5e corde du banjo) la note la plus grave n'est plus prise pour une basse (`Am`, pas `Am/C`).
+
+### Incompatible
+- Format `.gtab` en version 4 : `tuning` compte un nombre quelconque de cordes. Les fichiers
+  existants se chargent sans changement, mais une version antérieure de GRAT refuse un fichier
+  v4 comme trop récent.
+
 ## [3.6.1] — 2026-09-24
 
 ### Documentation
@@ -318,4 +343,5 @@ Première version.
 - Édition à la souris et palette d'outils.
 - Export PDF (menu, Cmd+E, `--export`), pages À propos et Aide, icône macOS, exemples.
 
+[4.0.0]: https://github.com/nicoolaj/GRAT/compare/v3.6.1...v4.0.0
 [3.6.1]: https://github.com/nicoolaj/GRAT/compare/v3.6.0...v3.6.1

@@ -1,7 +1,11 @@
 # GRAT
 
-GRAT is a six-string guitar tablature editor written in Rust (`egui`/`eframe`), with
-mouse-driven note entry and print-ready A4 PDF export. Single portable binary (macOS first,
+GRAT is a tablature editor for fretted instruments — guitar (6, 7 or 8 strings), bass (4, 5 or
+6), ukulele, baritone guitar and ukulele, 5-string banjo, mandolin — written in Rust
+(`egui`/`eframe`), with mouse-driven note entry and print-ready A4 PDF export. The Edit menu picks
+the instrument, the string count and a standard or custom tuning; the tab, the staff's clef, the
+chord names and the sound all follow it.
+The tuning can be printed under the title or at the start of each string. Single portable binary (macOS first,
 Windows/Linux targeted), light/dark theme following the OS, FR/EN interface auto-detected.
 
 The name is a recursive acronym that never settles: the title bar and splash screen draw,
@@ -65,7 +69,9 @@ Documents are saved as readable, diffable JSON, extension `.gtab`
 an older file fall back to a sensible default on load (`#[serde(default)]`). Since format
 version 2, a field that equals its default is simply not written (a duration is stored as a
 tick count rather than `{base, dots}`), which noticeably shrinks file size without changing
-the data model; existing v1 files keep loading as-is.
+the data model; existing v1 files keep loading as-is. Format version 4 lets `tuning` hold any
+number of strings (it used to be exactly six) and adds `instrument` and `tuning_label`; an older
+build refuses a v4 file as too new.
 
 ## Makefile targets
 

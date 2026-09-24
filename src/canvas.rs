@@ -7,7 +7,7 @@
 
 use eframe::egui;
 use grat::layout::Page;
-use grat::model::{Document, NoteValue, Strum, Technique, MAX_DOTS};
+use grat::model::{Document, Instrument, NoteValue, Strum, Technique, MAX_DOTS};
 use grat::{engrave, i18n::t, model, staff, tablature, Align, Prim, PAGE_H_MM, PAGE_W_MM};
 
 /// Visual gap between stacked pages on screen. Screen-only: has no equivalent in
@@ -137,6 +137,29 @@ pub fn set_time_sig_everywhere(state: &mut EditorState, doc: &mut Document, sig:
     mutate(state, doc, |doc| engrave::set_time_sig_everywhere(doc, sig));
     state.selected = None;
     state.range_anchor = None;
+}
+
+/// Change instrument and tuning, undoably (see [`Document::retune`]). A selection
+/// on a string that no longer exists is dropped.
+pub fn retune(
+    state: &mut EditorState,
+    doc: &mut Document,
+    instrument: Instrument,
+    tuning: Vec<u8>,
+    keep_pitches: bool,
+) {
+    mutate(state, doc, |doc| {
+        doc.retune(instrument, tuning, keep_pitches)
+    });
+    let strings = doc.tuning.len();
+    if [state.selected, state.range_anchor]
+        .iter()
+        .flatten()
+        .any(|s| s.string as usize >= strings)
+    {
+        state.selected = None;
+        state.range_anchor = None;
+    }
 }
 
 fn mutate(state: &mut EditorState, doc: &mut Document, f: impl FnOnce(&mut Document)) {
@@ -556,6 +579,10 @@ pub fn paste(state: &mut EditorState, doc: &mut Document) -> bool {
                 dur: event.dur,
                 ..ev
             };
+            // Copied before a retune to fewer strings: those notes have nowhere to go.
+            event
+                .notes
+                .retain(|n| (n.string as usize) < doc.tuning.len());
             pasted = true;
             e += 1;
         }
@@ -571,7 +598,7 @@ fn move_selection(state: &mut EditorState, doc: &Document, key: egui::Key) {
             ..sel
         },
         egui::Key::ArrowDown => Sel {
-            string: (sel.string + 1).min(5),
+            string: (sel.string + 1).min(doc.tuning.len().saturating_sub(1) as u8),
             ..sel
         },
         egui::Key::ArrowLeft => prev_cell(doc, sel),
@@ -831,7 +858,7 @@ pub fn show(
                     );
                 }
             }
-            // A multi-event selection: every cell (all 6 strings) between the anchor
+            // A multi-event selection: every cell (every string) between the anchor
             // and the live end, lightly shaded -- the live end itself is redrawn
             // below at full strength. Linear scan through `find_hit` per cell, same
             // as `find_hit` already does per frame: cheap next to actually
@@ -842,7 +869,7 @@ pub fn show(
                     if (b, e) < lo || (b, e) > hi {
                         continue;
                     }
-                    for string in 0..6u8 {
+                    for string in 0..doc.tuning.len() as u8 {
                         if let Some((index, hit)) = find_hit(
                             pages,
                             Sel {
@@ -1582,6 +1609,32 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retune_to_fewer_strings_keeps_the_selection_on_the_staff() {
+        let mut state = EditorState::default();
+        let mut doc = Document::new_empty();
+        let bass = Instrument::Bass.default_tuning().to_vec();
+
+        state.selected = Some(Sel {
+            bar: 0,
+            event: 0,
+            string: 5,
+        });
+        retune(&mut state, &mut doc, Instrument::Bass, bass.clone(), false);
+        assert_eq!(state.selected, None, "string 6 no longer exists");
+
+        let low = Sel {
+            bar: 0,
+            event: 0,
+            string: 3,
+        };
+        state.selected = Some(low);
+        move_selection(&mut state, &doc, egui::Key::ArrowDown);
+        assert_eq!(state.selected, Some(low), "the bottom string is the floor");
+        assert!(undo(&mut state, &mut doc));
+        assert_eq!(doc.tuning.len(), 6, "a retune is one undo step");
+    }
 
     #[test]
     fn every_technique_has_its_own_visibility_bit() {

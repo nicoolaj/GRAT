@@ -1,4 +1,4 @@
-//! Tablature row: six string lines, fret numbers, every playing-technique glyph,
+//! Tablature row: one line per string, fret numbers, every playing-technique glyph,
 //! the strum/tapping row, the rhythm row and the chord-name row.
 //!
 //! Drawn geometrically in page millimetres, like [`crate::notation`], so screen and
@@ -7,7 +7,9 @@
 //! strum arrow and its note head line up in one vertical column.
 
 use crate::engrave::{beam_groups, beam_run_span, beam_runs, Spacing};
-use crate::model::{technique_color, Bar, Document, Event, Note, NoteValue, Strum, Technique};
+use crate::model::{
+    technique_color, Bar, Document, Event, Note, NoteValue, Strum, Technique, TuningLabel,
+};
 use crate::staff::{
     arc, arrow_head, barline, dashed, ellipse, label_width, pt_for_cap, quad, time_signature, wave,
     Barline, FAINT, INK, PAPER,
@@ -19,8 +21,10 @@ use crate::{Align, Prim, P};
 pub const STRING_MM: f32 = 3.2;
 /// Digit height of the time signature on the tablature staff.
 const TIME_SIG_CAP_MM: f32 = 5.0;
-/// The six-line staff itself.
-pub const STAFF_MM: f32 = 5.0 * STRING_MM;
+/// Height of the staff itself: from the bottom string line to the top one.
+pub fn staff_mm(doc: &Document) -> f32 {
+    doc.tuning.len().saturating_sub(1) as f32 * STRING_MM
+}
 /// Band above the staff: bends, vibrato, slurs, palm-mute spans, labels.
 ///
 /// ponytail: `tab_scale` grows the technique glyphs drawn in this band but not
@@ -68,9 +72,11 @@ pub struct Hit {
     pub max: P,
 }
 
-/// y of a string line. String 0 is the high E, drawn on top.
-fn string_y(origin: P, string: u8) -> f32 {
-    origin.y + (5 - string.min(5)) as f32 * STRING_MM
+/// y of a string line. String 0 (a guitar's high E) is drawn on top, the last of
+/// `strings` on `origin.y`.
+fn string_y(origin: P, strings: usize, string: u8) -> f32 {
+    let last = strings.saturating_sub(1);
+    origin.y + (last - (string as usize).min(last)) as f32 * STRING_MM
 }
 
 /// What is printed on the string line for this note.
@@ -100,7 +106,7 @@ fn bend_label(quarters: u8) -> String {
 /// Draw the tablature row of one system.
 ///
 /// `origin` is the first barline: x of the music start, y of the BOTTOM string
-/// line (the low E). Clickable cells are appended to `hits`.
+/// line (a guitar's low E). Clickable cells are appended to `hits`.
 pub fn render(
     doc: &Document,
     spacing: &Spacing,
@@ -115,10 +121,12 @@ pub fn render(
     // The lines run on under a courtesy time signature past the closing barline.
     let next = spacing.bars.last().map_or(0, |b| b.index + 1);
     let lines_end = right + crate::engrave::time_sig_lead(doc, next, false);
-    let top = origin.y + STAFF_MM;
+    let strings = doc.tuning.len();
+    let staff = staff_mm(doc);
+    let top = origin.y + staff;
 
-    for s in 0..6u8 {
-        let y = string_y(origin, s);
+    for s in 0..strings as u8 {
+        let y = string_y(origin, strings, s);
         out.push(Prim::Line {
             a: P {
                 x: origin.x - HEAD_MM,
@@ -129,12 +137,23 @@ pub fn render(
             color: INK,
         });
     }
-    tab_label(origin.x - HEAD_MM + 2.0, origin.y, out);
+    // Named strings open the head and push "TAB" right: the time signature
+    // already fills the head's right-hand end.
+    if let TuningLabel::Strings { letters } = doc.tuning_label {
+        string_names(doc, origin, letters, out);
+        tab_label(origin.x - HEAD_MM + 4.4, origin.y, staff, out);
+    } else {
+        tab_label(origin.x - HEAD_MM + 2.0, origin.y, staff, out);
+    }
 
     // Barlines. The mark between two bars carries the closing repeat of the one on
     // its left and the opening repeat of the one on its right, which is why they
-    // are resolved together rather than per bar.
-    let dot_ys = [origin.y + 1.5 * STRING_MM, origin.y + 3.5 * STRING_MM];
+    // are resolved together rather than per bar. Repeat dots flank the middle of
+    // the staff in the two spaces nearest it: a space either side of a middle line
+    // (odd count), or the spaces next to a middle space (even count).
+    let mid = origin.y + staff * 0.5;
+    let off = if strings.is_multiple_of(2) { 1.0 } else { 0.5 } * STRING_MM;
+    let dot_ys = [mid - off, mid + off];
     for (i, bar) in spacing.bars.iter().enumerate() {
         let closes = if i == 0 {
             None
@@ -161,9 +180,11 @@ pub fn render(
     barline(closing, right, origin.y, top, &dot_ys, out);
     // The metre: at the start of the piece, where it changes, and a courtesy
     // signature closing a system whose successor opens with a change.
+    // Digits shrink on a short staff (four strings) so the pair never overlaps.
+    let cap = TIME_SIG_CAP_MM.min(staff * 0.45);
     for (x, sig) in crate::engrave::time_sig_marks(doc, spacing) {
-        let (lower, upper) = (origin.y + STAFF_MM * 0.25, origin.y + STAFF_MM * 0.75);
-        time_signature(origin.x + x, lower, upper, TIME_SIG_CAP_MM, sig, true, out);
+        let (lower, upper) = (origin.y + staff * 0.25, origin.y + staff * 0.75);
+        time_signature(origin.x + x, lower, upper, cap, sig, true, out);
     }
 
     for i in 0..spacing.bars.len() {
@@ -173,23 +194,66 @@ pub fn render(
 }
 
 /// The stacked "TAB" that opens a tablature staff, centred on the staff mid-line.
-fn tab_label(x: f32, y0: f32, out: &mut Vec<Prim>) {
-    const CAP: f32 = 2.6;
-    const GAP: f32 = 3.4; // baseline to baseline
-    let pt = pt_for_cap(CAP);
+/// Letters 3.4 mm apart, shrunk on a staff too short for that so that on four
+/// strings each sits centred in its own space. The lines are knocked out behind
+/// each letter, since on an odd count the strings run straight through them
+/// ("A" sits on the middle one).
+fn tab_label(x: f32, y0: f32, staff: f32, out: &mut Vec<Prim>) {
+    let k = (staff / 3.0 / 3.4).min(1.0);
+    let cap = 2.6 * k;
+    let gap = 3.4 * k; // baseline to baseline
+    let pt = pt_for_cap(cap);
     // `pos.y` is the baseline; the stack runs from B's baseline up to T's cap
     // top. Put that span's centre on the staff's own centre.
-    let bottom_baseline = y0 + STAFF_MM * 0.5 - GAP - CAP * 0.5;
+    let bottom_baseline = y0 + staff * 0.5 - gap - cap * 0.5;
     for (i, letter) in ["T", "A", "B"].iter().enumerate() {
+        let baseline = bottom_baseline + (2 - i) as f32 * gap;
+        // Capitals have no descender: the knock-out hugs them vertically, or it
+        // would nick a four-string staff's inner lines just below "T" and above "B".
+        out.push(quad(
+            x - 0.2,
+            baseline - 0.05,
+            x + label_width(letter, pt) * 1.2 + 0.2, // capitals outrun a digit's 0.556 em
+            baseline + cap + 0.05,
+            PAPER,
+        ));
         out.push(Prim::Text {
-            pos: P {
-                x,
-                y: bottom_baseline + (2 - i) as f32 * GAP,
-            },
+            pos: P { x, y: baseline },
             s: (*letter).to_string(),
             pt,
             color: INK,
             align: Align::Left,
+        });
+    }
+}
+
+/// Each open string's name on its own line at the very start of the staff, just
+/// left of "TAB", over a paper knock-out like a fret number's.
+fn string_names(doc: &Document, origin: P, letters: bool, out: &mut Vec<Prim>) {
+    const CAP: f32 = 1.3;
+    let pt = pt_for_cap(CAP);
+    let x = origin.x - HEAD_MM + 2.0;
+    let strings = doc.tuning.len();
+    for (s, &open) in doc.tuning.iter().enumerate() {
+        let y = string_y(origin, strings, s as u8);
+        let name = crate::i18n::note_name(open, letters);
+        let w = label_width(&name, pt);
+        out.push(quad(
+            x - w * 0.5 - 0.3,
+            y - CAP * 0.7,
+            x + w * 0.5 + 0.3,
+            y + CAP * 0.7,
+            PAPER,
+        ));
+        out.push(Prim::Text {
+            pos: P {
+                x,
+                y: y - CAP * 0.5,
+            },
+            s: name,
+            pt,
+            color: INK,
+            align: Align::Center,
         });
     }
 }
@@ -220,7 +284,8 @@ fn render_bar(
     // `tab_scale` grows the fret numbers and technique glyphs printed here; the
     // string grid, the clickable cells and the band around it stay put.
     let cap = FRET_CAP_MM * scale(doc);
-    let band = origin.y + STAFF_MM + 1.2;
+    let strings = doc.tuning.len();
+    let band = origin.y + staff_mm(doc) + 1.2;
 
     for (ei, event) in bar.events.iter().enumerate() {
         let Some(&ex) = layout.events.get(ei) else {
@@ -230,8 +295,8 @@ fn render_bar(
 
         // Every string is clickable, whether or not it currently holds a note:
         // that is how a note gets placed in the first place.
-        for s in 0..6u8 {
-            let y = string_y(origin, s);
+        for s in 0..strings as u8 {
+            let y = string_y(origin, strings, s);
             hits.push(Hit {
                 bar: layout.index,
                 event: ei,
@@ -248,7 +313,7 @@ fn render_bar(
         }
 
         for note in &event.notes {
-            let y = string_y(origin, note.string);
+            let y = string_y(origin, strings, note.string);
 
             // A tie's continuation is not picked again. Printing its fret number
             // would read as a second attack, so the tab shows only the arc that
@@ -677,7 +742,7 @@ fn bend_arrow(
 /// belonging to one note.
 fn spans(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
     let sc = |mm: f32| mm * scale(doc);
-    let band = origin.y + STAFF_MM + 1.2;
+    let band = origin.y + staff_mm(doc) + 1.2;
     let mut cells: Vec<(f32, bool, bool)> = Vec::new();
     for b in &spacing.bars {
         let Some(bar) = doc.bars.get(b.index) else {
@@ -969,7 +1034,9 @@ const CHORDS: &[(&[u8], &str)] = &[
 /// The chord `event` spells, e.g. "Am", "G/B", "Lam" in French — or `None` for
 /// a rest, a single note, or a set of notes no row of [`CHORDS`] matches. Dead
 /// notes have no pitch and are left out. Among the notes, the lowest decides the
-/// root when it can be one, and becomes the bass of a slash chord otherwise.
+/// root when it can be one, and becomes the bass of a slash chord otherwise —
+/// unless the tuning is re-entrant (a ukulele's high G): there the lowest note
+/// sounding is an accident of the tuning, not a bass, so no slash is written.
 pub fn chord_name(doc: &Document, event: &Event) -> Option<String> {
     let mut pitches: Vec<u8> = event
         .notes
@@ -989,7 +1056,7 @@ pub fn chord_name(doc: &Document, event: &Event) -> Option<String> {
         shape.sort_unstable();
         let (_, suffix) = CHORDS.iter().find(|(s, _)| *s == shape.as_slice())?;
         let name = format!("{}{}", crate::i18n::pitch_name(root), suffix);
-        Some(if root == bass {
+        Some(if root == bass || doc.is_reentrant() {
             name
         } else {
             format!("{}/{}", name, crate::i18n::pitch_name(bass))

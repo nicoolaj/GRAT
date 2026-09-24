@@ -11,7 +11,7 @@
 use std::ops::Range;
 
 use crate::engrave::{beam_groups, beam_run_span, beam_runs, BeamGroup, Spacing};
-use crate::model::{technique_color, Document, Event, NoteValue, Technique};
+use crate::model::{technique_color, Document, Event, Instrument, Note, NoteValue, Technique};
 use crate::staff::{barline, ellipse, rest, time_signature, Barline, INK, PAPER};
 use crate::{Prim, Rgb, P};
 
@@ -40,7 +40,7 @@ pub fn half_range(doc: &Document, bars: Range<usize>) -> (i32, i32) {
         for bar in slice {
             for event in &bar.events {
                 for note in &event.notes {
-                    let (half, _) = staff_position(doc.pitch(note));
+                    let (half, _) = staff_position(doc, note);
                     lo = lo.min(half);
                     hi = hi.max(half);
                 }
@@ -78,12 +78,35 @@ const BEAMLET: f32 = 1.1; // length of a partial beam, in spaces
 const LEDGER_EXT: f32 = 0.42;
 const MAX_SLOPE: f32 = 1.5; // total beam rise, in spaces
 
+/// Which staff an instrument reads from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Clef {
+    /// Treble clef *8va bassa*: written an octave above what sounds. Guitars.
+    Treble8,
+    /// Treble clef at pitch: ukulele, mandolin.
+    Treble,
+    /// Bass clef *8va bassa*, the bass guitar's.
+    Bass8,
+}
+
+/// ponytail: no small "8" is engraved under an octave clef, so the guitar's staff
+/// looks exactly as it always has; a `Prim::Text` under the clef if anyone asks.
+fn clef(instrument: Instrument) -> Clef {
+    match instrument {
+        Instrument::Guitar
+        | Instrument::BaritoneGuitar
+        | Instrument::BaritoneUkulele
+        | Instrument::Banjo => Clef::Treble8,
+        Instrument::Ukulele | Instrument::Mandolin => Clef::Treble,
+        Instrument::Bass => Clef::Bass8,
+    }
+}
+
 /// A note's vertical position on the staff, in half-spaces above the bottom line,
-/// plus whether its spelling needs a sharp.
-///
-/// Guitar notation is treble clef *8va bassa*: what is written sounds an octave
-/// lower, so the written pitch is the sounding pitch plus twelve.
-fn staff_position(sounding_midi: u8) -> (i32, bool) {
+/// plus whether its spelling needs a sharp. The clef comes from the document's
+/// instrument, the pitch from its tuning.
+fn staff_position(doc: &Document, note: &Note) -> (i32, bool) {
+    let clef = clef(doc.instrument);
     // Diatonic step within the octave, and whether the pitch class is a black key.
     const STEPS: [(i32, bool); 12] = [
         (0, false), // C
@@ -99,11 +122,14 @@ fn staff_position(sounding_midi: u8) -> (i32, bool) {
         (5, true),  // A#
         (6, false), // B
     ];
-    let written = sounding_midi as i32 + 12;
+    let octave = if clef == Clef::Treble { 0 } else { 12 };
+    let written = doc.pitch(note) as i32 + octave;
     let (step, sharp) = STEPS[(written.rem_euclid(12)) as usize];
     let diatonic = 7 * written.div_euclid(12) + step;
-    // The bottom line of a treble staff is E4 (MIDI 64), diatonic 37.
-    (diatonic - 37, sharp)
+    // The bottom line of a treble staff is E4 (MIDI 64), diatonic 37; of a bass
+    // staff G2 (MIDI 43), diatonic 25.
+    let bottom = if clef == Clef::Bass8 { 25 } else { 37 };
+    (diatonic - bottom, sharp)
 }
 
 /// Horizontal room reserved at the left of every system for the clef and the
@@ -136,7 +162,11 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
             color: INK,
         });
     }
-    g_clef(origin.x - HEAD_MM + 3.6, origin.y, sp, out);
+    if clef(doc.instrument) == Clef::Bass8 {
+        f_clef(origin.x - HEAD_MM + 1.3, origin.y, sp, out);
+    } else {
+        g_clef(origin.x - HEAD_MM + 3.6, origin.y, sp, out);
+    }
 
     // Barlines, and the time signature. A repeat mark between two bars carries the
     // closing repeat of the bar on its left and the opening one of the bar on its
@@ -299,7 +329,7 @@ fn stem_up_for(doc: &Document, event: &Event) -> bool {
     let furthest = event
         .notes
         .iter()
-        .map(|note| staff_position(doc.pitch(note)).0 - 4)
+        .map(|note| staff_position(doc, note).0 - 4)
         .max_by_key(|d| d.abs())
         .unwrap_or(0);
     furthest < 0
@@ -310,7 +340,7 @@ fn head_positions(doc: &Document, event: &Event, x: f32, y0: f32, sp: f32, up: b
         .notes
         .iter()
         .map(|note| {
-            let (half, sharp) = staff_position(doc.pitch(note));
+            let (half, sharp) = staff_position(doc, note);
             Head {
                 half,
                 sharp,
@@ -620,7 +650,7 @@ fn group_stem_up(doc: &Document, bar: &crate::model::Bar, group: &BeamGroup) -> 
         .events
         .iter()
         .flat_map(|&ei| bar.events[ei].notes.iter())
-        .map(|note| staff_position(doc.pitch(note)).0 - 4)
+        .map(|note| staff_position(doc, note).0 - 4)
         .max_by_key(|d| d.abs())
         .unwrap_or(0);
     furthest < 0
@@ -855,7 +885,6 @@ fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
         [-0.12, -2.44, 0.24],
         [-0.35, -2.25, 0.30],
     ];
-    const STEPS: usize = 6;
     const DOT: [f32; 3] = [R0, 0.00, 0.12];
     const PEARL: [f32; 3] = [-0.43, -2.00, 0.37];
 
@@ -864,7 +893,7 @@ fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
         x: cx + x * sp,
         y: g + y * sp,
     };
-    let mut path: Vec<(P, f32)> = Vec::with_capacity(SPIRAL_STEPS + 1 + (PATH.len() - 1) * STEPS);
+    let mut path: Vec<(P, f32)> = Vec::with_capacity(SPIRAL_STEPS + 1 + (PATH.len() - 1) * 6);
 
     for i in 0..=SPIRAL_STEPS {
         let u = i as f32 / SPIRAL_STEPS as f32;
@@ -877,15 +906,65 @@ fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
         path.push((at(r * phi.cos(), -r * phi.sin() * SQUASH), w));
     }
 
-    let n = PATH.len();
+    // Clamping the ends makes the first tangent point straight up, which is
+    // exactly how the eased spiral arrives.
+    spline(&PATH, at, &mut path);
+    stroke(&path, sp, out);
+    for [x, y, r] in [DOT, PEARL] {
+        out.push(Prim::Poly {
+            pts: ellipse(at(x, y), r * sp, r * sp, 0.0),
+            color: INK,
+        });
+    }
+}
+
+/// A bass clef: the knob on the F line (the fourth), the arch over the top line
+/// thickening down the right side and thinning into its tail, and the two dots
+/// either side of the F line. Same construction as [`g_clef`].
+fn f_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
+    // (x, y, width) in spaces from the knob's centre on the F line.
+    const PATH: [[f32; 3]; 9] = [
+        [-0.25, 0.30, 0.20],
+        [0.20, 0.82, 0.16],
+        [0.80, 1.02, 0.18], // the top of the arch, on the top line
+        [1.40, 0.80, 0.30],
+        [1.72, 0.15, 0.42],
+        [1.65, -0.60, 0.46], // the thick right side
+        [1.30, -1.35, 0.40],
+        [0.75, -2.00, 0.28],
+        [0.00, -2.60, 0.12],
+    ];
+    const KNOB: [f32; 3] = [0.0, 0.0, 0.42];
+    const DOTS: [[f32; 3]; 2] = [[2.15, 0.5, 0.16], [2.15, -0.5, 0.16]];
+
+    let f = y0 + 3.0 * sp;
+    let at = |x: f32, y: f32| P {
+        x: cx + x * sp,
+        y: f + y * sp,
+    };
+    let mut path: Vec<(P, f32)> = vec![(at(PATH[0][0], PATH[0][1]), PATH[0][2])];
+    spline(&PATH, at, &mut path);
+    stroke(&path, sp, out);
+    for [x, y, r] in [KNOB, DOTS[0], DOTS[1]] {
+        out.push(Prim::Poly {
+            pts: ellipse(at(x, y), r * sp, r * sp, 0.0),
+            color: INK,
+        });
+    }
+}
+
+/// Append a Catmull-Rom spline through `points` ((x, y, width) in the glyph's own
+/// units, placed by `at`) to `path`, interpolating the width along it. The first
+/// point is not pushed: the caller's path already ends there.
+fn spline(points: &[[f32; 3]], at: impl Fn(f32, f32) -> P, path: &mut Vec<(P, f32)>) {
+    const STEPS: usize = 6;
+    let n = points.len();
     for i in 0..n - 1 {
-        // Clamping the ends makes the first tangent point straight up, which is
-        // exactly how the eased spiral arrives.
         let (p0, p1, p2, p3) = (
-            PATH[i.saturating_sub(1)],
-            PATH[i],
-            PATH[i + 1],
-            PATH[(i + 2).min(n - 1)],
+            points[i.saturating_sub(1)],
+            points[i],
+            points[i + 1],
+            points[(i + 2).min(n - 1)],
         );
         let c1 = [p1[0] + (p2[0] - p0[0]) / 6.0, p1[1] + (p2[1] - p0[1]) / 6.0];
         let c2 = [p2[0] - (p3[0] - p1[0]) / 6.0, p2[1] - (p3[1] - p1[1]) / 6.0];
@@ -899,18 +978,15 @@ fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
             path.push((at(x, y), p1[2] + (p2[2] - p1[2]) * t));
         }
     }
+}
 
+/// Ink a sampled path, each segment as wide as the mean of its ends' widths.
+fn stroke(path: &[(P, f32)], sp: f32, out: &mut Vec<Prim>) {
     for pair in path.windows(2) {
         out.push(Prim::Line {
             a: pair[0].0,
             b: pair[1].0,
             w: 0.5 * (pair[0].1 + pair[1].1) * sp,
-            color: INK,
-        });
-    }
-    for [x, y, r] in [DOT, PEARL] {
-        out.push(Prim::Poly {
-            pts: ellipse(at(x, y), r * sp, r * sp, 0.0),
             color: INK,
         });
     }

@@ -947,6 +947,41 @@ fn row_extent_grows_above_the_staff_for_a_high_run_but_not_below() {
 }
 
 #[test]
+fn the_clef_follows_the_instrument() {
+    let at = |instrument: Instrument, tuning: Vec<u8>, n: Note| {
+        let mut doc = doc_with(Bar {
+            events: vec![ev(NoteValue::Quarter, vec![n])],
+            ..Default::default()
+        });
+        doc.retune(instrument, tuning, false);
+        notation::half_range(&doc, 0..1).0
+    };
+    let open = |string| Note {
+        string,
+        fret: 0,
+        tech: Technique::Plain,
+        tie_next: false,
+    };
+    // A bass reads the bass clef an octave up: its open E sits on the first
+    // ledger line below the staff, not seven below a treble one.
+    assert_eq!(at(Instrument::Bass, vec![43, 38, 33, 28], open(3)), -2);
+    // A ukulele reads treble at pitch: its C string is middle C, one ledger
+    // below. The guitar's own middle C (G string, 5th fret) is written an octave
+    // up, inside the staff.
+    assert_eq!(at(Instrument::Ukulele, vec![69, 64, 60, 67], open(2)), -2);
+    assert_eq!(
+        notation::half_range(
+            &doc_with(Bar {
+                events: vec![ev(NoteValue::Quarter, vec![note(5)])],
+                ..Default::default()
+            }),
+            0..1
+        ),
+        (0, 8)
+    );
+}
+
+#[test]
 fn time_sig_marks_follow_engraving_rules() {
     // 4/4 4/4 | 3/4 3/4, broken after bar 1 and after bar 2.
     let mut doc = two_bars_of_distinct_quarters();

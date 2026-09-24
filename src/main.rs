@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use eframe::egui;
 use grat::i18n::{self, t};
-use grat::model::{technique_color, Document, LoadError, Row, Technique};
+use grat::model::{technique_color, Document, Instrument, LoadError, Row, Technique, TuningLabel};
 
 const SHORTCUT_NEW: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
@@ -300,6 +300,10 @@ struct TablaturesApp {
     pending_open_pdf: Option<PathBuf>,
     /// Last error or informational notice, shown in the status bar.
     status_msg: Option<String>,
+    /// A retune waiting on "keep the frets or the pitches?" -- see `request_retune`.
+    pending_retune: Option<(Instrument, Vec<u8>)>,
+    /// The custom tuning being edited, while its dialog is open.
+    tuning_draft: Option<Vec<u8>>,
     editor: canvas::EditorState,
     /// The live player. Holds the window whenever `open`.
     live: live::LiveState,
@@ -355,6 +359,8 @@ impl TablaturesApp {
             show_help: false,
             pending_open_pdf: None,
             status_msg: None,
+            pending_retune: None,
+            tuning_draft: None,
             editor,
             live: live::LiveState::default(),
             logo,
@@ -442,6 +448,116 @@ impl TablaturesApp {
         } else {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+    }
+
+    /// Retune straight away when no written note would move or sound different;
+    /// otherwise ask first whether to keep the frets or the pitches.
+    fn request_retune(&mut self, instrument: Instrument, tuning: Vec<u8>) {
+        let has_notes = self
+            .doc
+            .bars
+            .iter()
+            .flat_map(|b| &b.events)
+            .any(|e| !e.is_rest());
+        if has_notes && tuning != self.doc.tuning {
+            self.pending_retune = Some((instrument, tuning));
+        } else if instrument != self.doc.instrument || tuning != self.doc.tuning {
+            self.apply_retune(instrument, tuning, false);
+        }
+    }
+
+    fn apply_retune(&mut self, instrument: Instrument, tuning: Vec<u8>, keep_pitches: bool) {
+        canvas::retune(
+            &mut self.editor,
+            &mut self.doc,
+            instrument,
+            tuning,
+            keep_pitches,
+        );
+        self.dirty = true;
+        self.layout_dirty = true;
+    }
+
+    /// The Edit menu's instrument, string-count, tuning and tuning-display entries.
+    fn tuning_menus(&mut self, ui: &mut egui::Ui) {
+        let current = self.doc.instrument;
+        let strings = self.doc.tuning.len();
+        ui.menu_button(t("menu.instrument"), |ui| {
+            for inst in Instrument::ALL {
+                if ui
+                    .selectable_label(inst == current, instrument_label(inst))
+                    .clicked()
+                {
+                    self.request_retune(inst, inst.default_tuning().to_vec());
+                    ui.close();
+                }
+            }
+        });
+        ui.menu_button(t("menu.strings"), |ui| {
+            for n in current.string_counts() {
+                if ui.selectable_label(n == strings, n.to_string()).clicked() {
+                    if let Some(preset) = current.tunings().find(|p| p.notes.len() == n) {
+                        self.request_retune(current, preset.notes.to_vec());
+                    }
+                    ui.close();
+                }
+            }
+        });
+        ui.menu_button(t("menu.tuning"), |ui| {
+            for preset in current.tunings().filter(|p| p.notes.len() == strings) {
+                let label = format!(
+                    "{} — {}",
+                    t(preset.key),
+                    i18n::tuning_names(preset.notes, false)
+                );
+                if ui
+                    .selectable_label(self.doc.tuning == preset.notes, label)
+                    .clicked()
+                {
+                    self.request_retune(current, preset.notes.to_vec());
+                    ui.close();
+                }
+            }
+        });
+        if ui.button(t("menu.custom_tuning")).clicked() {
+            self.tuning_draft = Some(self.doc.tuning.clone());
+            ui.close();
+        }
+        // Where the page names the open strings. Each choice previews itself with
+        // the document's own tuning.
+        ui.menu_button(t("menu.tuning_label"), |ui| {
+            let names = |letters| i18n::tuning_names(&self.doc.tuning, letters);
+            let options = [
+                (TuningLabel::Hidden, t("tuning_label.hidden")),
+                (
+                    TuningLabel::Header { letters: false },
+                    format!("{} ({})", t("tuning_label.header"), names(false)),
+                ),
+                (
+                    TuningLabel::Header { letters: true },
+                    format!("{} ({})", t("tuning_label.header"), names(true)),
+                ),
+                (
+                    TuningLabel::Strings { letters: true },
+                    format!("{} ({})", t("tuning_label.strings"), names(true)),
+                ),
+                (
+                    TuningLabel::Strings { letters: false },
+                    format!("{} ({})", t("tuning_label.strings"), names(false)),
+                ),
+            ];
+            for (label, text) in options {
+                if ui
+                    .selectable_label(self.doc.tuning_label == label, text)
+                    .clicked()
+                {
+                    self.doc.tuning_label = label;
+                    self.dirty = true;
+                    self.layout_dirty = true;
+                    ui.close();
+                }
+            }
+        });
     }
 
     fn do_new(&mut self) {
@@ -717,6 +833,8 @@ impl TablaturesApp {
                             }
                         }
                     });
+                    ui.separator();
+                    self.tuning_menus(ui);
                 });
 
                 ui.menu_button(t("menu.tools"), |ui| {
@@ -937,6 +1055,18 @@ fn rows_editor(ui: &mut egui::Ui, rows: &mut Vec<Row>) -> bool {
     changed
 }
 
+fn instrument_label(instrument: Instrument) -> String {
+    t(match instrument {
+        Instrument::Guitar => "instrument.guitar",
+        Instrument::Bass => "instrument.bass",
+        Instrument::Ukulele => "instrument.ukulele",
+        Instrument::BaritoneGuitar => "instrument.baritone_guitar",
+        Instrument::BaritoneUkulele => "instrument.baritone_ukulele",
+        Instrument::Banjo => "instrument.banjo",
+        Instrument::Mandolin => "instrument.mandolin",
+    })
+}
+
 fn row_label(row: Row) -> String {
     t(match row {
         Row::Tab => "row.tab",
@@ -1054,6 +1184,72 @@ impl eframe::App for TablaturesApp {
             });
             if resp.should_close() {
                 self.pending = None;
+            }
+        }
+
+        // A retune over written notes: the tab can stay as written (and sound
+        // different) or follow the sound (and be re-fretted).
+        if let Some((instrument, tuning)) = self.pending_retune.clone() {
+            let resp = egui::Modal::new(egui::Id::new("retune_modal")).show(ui.ctx(), |ui| {
+                ui.set_min_width(340.0);
+                ui.heading(t("dialog.retune_title"));
+                ui.label(t("dialog.retune_body"));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    for (key, keep_pitches) in
+                        [("dialog.keep_frets", false), ("dialog.keep_pitches", true)]
+                    {
+                        if ui.button(t(key)).clicked() {
+                            self.apply_retune(instrument, tuning.clone(), keep_pitches);
+                            self.pending_retune = None;
+                        }
+                    }
+                    if ui.button(t("dialog.cancel")).clicked() {
+                        self.pending_retune = None;
+                    }
+                });
+            });
+            if resp.should_close() {
+                self.pending_retune = None;
+            }
+        }
+
+        // Custom tuning: each string stepped a semitone at a time, applied on OK
+        // through the same keep-frets-or-pitches question as a preset.
+        if let Some(draft) = &mut self.tuning_draft {
+            let (mut apply, mut close) = (None, false);
+            let resp = egui::Modal::new(egui::Id::new("tuning_modal")).show(ui.ctx(), |ui| {
+                ui.set_min_width(240.0);
+                ui.heading(t("dialog.custom_tuning_title"));
+                ui.add_space(4.0);
+                egui::Grid::new("tuning_grid").show(ui, |ui| {
+                    for (i, midi) in draft.iter_mut().enumerate() {
+                        ui.label(format!("{} {}", t("tuning.string"), i + 1));
+                        if ui.small_button("−").clicked() {
+                            *midi = midi.saturating_sub(1).max(12);
+                        }
+                        ui.label(i18n::pitch_label(*midi));
+                        if ui.small_button("+").clicked() {
+                            *midi = (*midi + 1).min(96);
+                        }
+                        ui.end_row();
+                    }
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(t("dialog.ok")).clicked() {
+                        apply = Some(draft.clone());
+                    }
+                    if ui.button(t("dialog.cancel")).clicked() {
+                        close = true;
+                    }
+                });
+            });
+            if let Some(tuning) = apply {
+                self.tuning_draft = None;
+                self.request_retune(self.doc.instrument, tuning);
+            } else if close || resp.should_close() {
+                self.tuning_draft = None;
             }
         }
 

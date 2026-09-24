@@ -113,3 +113,41 @@ pub fn rest_name(v: NoteValue) -> String {
 pub fn pitch_name(midi: u8) -> String {
     t(&format!("pitch.{}", midi % 12))
 }
+
+/// Letter name of a pitch class, whatever the interface language: the "E A D G B E"
+/// option exists precisely for a reader who wants letters rather than "Mi La Ré".
+/// Music symbols, like the chord suffixes, not English words.
+const LETTERS: [&str; 12] = [
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+];
+
+/// A pitch class named in letters (`letters`) or in the interface's own names.
+pub fn note_name(midi: u8, letters: bool) -> String {
+    if letters {
+        LETTERS[(midi % 12) as usize].to_string()
+    } else {
+        pitch_name(midi)
+    }
+}
+
+/// A tuning's open strings, lowest string first, the way players say it:
+/// "E A D G B E", or "G C E A" for a ukulele.
+pub fn tuning_names(tuning: &[u8], letters: bool) -> String {
+    tuning
+        .iter()
+        .rev()
+        .map(|&m| note_name(m, letters))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Pitch name with its octave, e.g. "E2" / "Mi1": French numbering puts middle C
+/// in octave 3, English in octave 4, hence the `pitch.middle_c_octave` key.
+pub fn pitch_label(midi: u8) -> String {
+    let middle_c: i32 = t("pitch.middle_c_octave").parse().unwrap_or(4);
+    format!(
+        "{}{}",
+        pitch_name(midi),
+        i32::from(midi) / 12 - 5 + middle_c
+    )
+}

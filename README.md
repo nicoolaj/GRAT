@@ -12,5 +12,5 @@
 
 > [!NOTE]
 > **GRAT**
-> 🇬🇧 Guirar tabs editor with live-mode.
-> 🇫🇷 Editeur de tablatures pour guitare avec mode Live.
+> 🇬🇧 Tabs editor for guitar, bass, ukulele and more, with live-mode.
+> 🇫🇷 Editeur de tablatures pour guitare, basse, ukulélé et plus, avec mode Live.

@@ -11,7 +11,7 @@ use std::ops::Range;
 
 use crate::engrave::{self, Spacing};
 use crate::i18n;
-use crate::model::{Bar, Document, Row};
+use crate::model::{Bar, Document, Row, TuningLabel};
 use crate::notation;
 use crate::staff::{self, FAINT, INK};
 use crate::tablature;
@@ -300,13 +300,29 @@ fn text_line(out: &mut Vec<Prim>, top: f32, cap_mm: f32, s: String, color: Rgb, 
     baseline
 }
 
-/// Title and author, centred under the top margin. Returns the new cursor: the y
-/// where the first block's footprint should start.
+/// Title and author, centred under the top margin, and the tuning if the document
+/// asks for it in the header. Returns the new cursor: the y where the first
+/// block's footprint should start.
 fn title_block(doc: &Document, top: f32, out: &mut Vec<Prim>) -> f32 {
     let cx = PAGE_W_MM / 2.0;
     let mut cursor = text_line(out, top, TITLE_CAP_MM, doc.title.clone(), INK, cx);
     cursor -= TITLE_GAP_MM;
     cursor = text_line(out, cursor, AUTHOR_CAP_MM, doc.author.clone(), FAINT, cx);
+    // Flush left on the author's baseline, where printed tabs put it: under the
+    // title without costing the page a line, so pagination is the same either way.
+    if let TuningLabel::Header { letters } = doc.tuning_label {
+        out.push(Prim::Text {
+            pos: P::new(MARGIN_MM, cursor),
+            s: format!(
+                "{} {}",
+                i18n::t("page.tuning"),
+                i18n::tuning_names(&doc.tuning, letters)
+            ),
+            pt: staff::pt_for_cap(AUTHOR_CAP_MM),
+            color: INK,
+            align: Align::Left,
+        });
+    }
     cursor - TITLE_BLOCK_GAP_MM
 }
 
@@ -340,10 +356,11 @@ fn footer(page_no: usize, total: usize, out: &mut Vec<Prim>) {
 /// apart: both are computed from this one function.
 ///
 /// `half_range` is the notation row's actual pitch extent for this system (see
-/// [`notation::half_range`]); the other rows ignore it.
-fn row_extent(row: Row, half_range: (i32, i32)) -> (f32, f32) {
+/// [`notation::half_range`]); the other rows ignore it. The tab's height follows
+/// the document's string count.
+fn row_extent(doc: &Document, row: Row, half_range: (i32, i32)) -> (f32, f32) {
     match row {
-        Row::Tab => (tablature::STAFF_MM + tablature::BAND_MM, 0.0),
+        Row::Tab => (tablature::staff_mm(doc) + tablature::BAND_MM, 0.0),
         Row::Rhythm => (0.0, tablature::RHYTHM_MM),
         Row::Strum => (tablature::STRUM_MM, 0.0),
         Row::Chords => (tablature::CHORD_MM, 0.0),
@@ -360,7 +377,7 @@ fn block_height(doc: &Document, bars: Range<usize>) -> f32 {
     doc.rows
         .iter()
         .map(|&r| {
-            let (above, below) = row_extent(r, half_range);
+            let (above, below) = row_extent(doc, r, half_range);
             above + below
         })
         .sum()
@@ -385,7 +402,7 @@ fn place_block(
     let mut cursor = top;
     let mut tab_origin_y = None;
     for &row in &doc.rows {
-        let (above, below) = row_extent(row, half_range);
+        let (above, below) = row_extent(doc, row, half_range);
         let origin_y = cursor - above;
         cursor = origin_y - below;
         let origin = P::new(x, origin_y);

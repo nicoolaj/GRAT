@@ -1,7 +1,11 @@
 # GRAT
 
-GRAT est un éditeur de tablatures pour guitare 6 cordes, en Rust (`egui`/`eframe`), avec saisie à la
-souris et export PDF A4 prêt à imprimer. Binaire unique, portable (macOS en priorité,
+GRAT est un éditeur de tablatures pour instruments à frettes — guitare (6, 7 ou 8 cordes), basse
+(4, 5 ou 6), ukulélé, guitare et ukulélé baryton, banjo 5 cordes, mandoline — en Rust
+(`egui`/`eframe`), avec saisie à la souris et export PDF A4 prêt à imprimer. Le menu Édition
+choisit l'instrument, le nombre de cordes et un accordage standard ou personnalisé ; la
+tablature, la clé de la portée, les noms d'accords et le son suivent. L'accordage peut s'imprimer
+sous le titre ou au début de chaque corde. Binaire unique, portable (macOS en priorité,
 Windows/Linux visés), thème clair/sombre suivant l'OS, interface FR/EN détectée
 automatiquement.
 
@@ -73,7 +77,10 @@ champs absents dans un fichier plus ancien reprennent une valeur par défaut sen
 chargement (`#[serde(default)]`). Depuis la version 2 du format, un champ qui vaut son
 défaut n'est simplement plus écrit (une durée s'enregistre comme un nombre de ticks
 plutôt que `{base, dots}`), ce qui réduit nettement la taille des fichiers sans changer
-le modèle de données ; les fichiers v1 existants continuent de se charger tels quels.
+le modèle de données ; les fichiers v1 existants continuent de se charger tels quels. La
+version 4 du format permet à `tuning` de compter un nombre quelconque de cordes (six
+exactement auparavant) et ajoute `instrument` et `tuning_label` ; une version antérieure du
+logiciel refuse un fichier v4 comme trop récent.
 
 ## Cibles Makefile
 

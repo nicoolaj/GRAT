@@ -1,8 +1,8 @@
 //! Integration tests against the public `tablatures` crate API.
 
 use grat::model::{
-    Bar, Document, Dur, Event, LoadError, Note, NoteValue, Row, Strum, Technique, FORMAT_VERSION,
-    MAX_DOTS,
+    Bar, Document, Dur, Event, Instrument, LoadError, Note, NoteValue, Row, Strum, Technique,
+    TuningLabel, FORMAT_VERSION, MAX_DOTS,
 };
 use grat::{engrave, i18n, layout, pdf};
 
@@ -172,6 +172,78 @@ fn v2_block_model_migrates_to_rows() {
     assert_eq!(rows(&doc.to_json().unwrap()), doc.rows);
 }
 
+/// A document with one event holding `notes`, each `(string, fret)`.
+fn one_event(notes: &[(u8, u8)]) -> Document {
+    let mut doc = Document::new_empty();
+    doc.bars[0].events[0].notes = notes
+        .iter()
+        .map(|&(string, fret)| Note {
+            string,
+            fret,
+            tech: Technique::Plain,
+            tie_next: false,
+        })
+        .collect();
+    doc
+}
+
+fn frets(doc: &Document) -> Vec<(u8, u8)> {
+    doc.bars[0].events[0]
+        .notes
+        .iter()
+        .map(|n| (n.string, n.fret))
+        .collect()
+}
+
+#[test]
+fn a_bass_document_round_trips_and_bad_tunings_are_refused() {
+    let mut doc = one_event(&[(3, 5)]);
+    doc.retune(
+        Instrument::Bass,
+        Instrument::Bass.default_tuning().to_vec(),
+        false,
+    );
+    doc.tuning_label = TuningLabel::Strings { letters: true };
+    let json = doc.to_json().unwrap();
+    assert_eq!(Document::from_json(&json).unwrap(), doc);
+    assert_eq!(doc.pitch(&doc.bars[0].events[0].notes[0]), 28 + 5);
+
+    // A tuning with no strings, or a note on a string the tuning lacks, would
+    // index out of bounds: refused like any other unreadable file.
+    assert_eq!(
+        Document::from_json(r#"{"tuning": []}"#),
+        Err(LoadError::Parse)
+    );
+    let orphan = r#"{"tuning": [43, 38, 33, 28],
+        "bars": [{"events": [{"dur": 960, "notes": [{"string": 5, "fret": 0}]}]}]}"#;
+    assert_eq!(Document::from_json(orphan), Err(LoadError::Parse));
+}
+
+#[test]
+fn retune_keeps_the_frets_or_the_pitches() {
+    // Keeping the frets: the tab is untouched, notes on a vanished string go.
+    let mut doc = one_event(&[(0, 3), (5, 2)]);
+    doc.retune(
+        Instrument::Ukulele,
+        Instrument::Ukulele.default_tuning().to_vec(),
+        false,
+    );
+    assert_eq!(frets(&doc), [(0, 3)]);
+
+    // Keeping the pitches: the low E open, dropped to D, is now fret 2.
+    let mut doc = one_event(&[(5, 0), (0, 0)]);
+    doc.retune(Instrument::Guitar, vec![64, 59, 55, 50, 45, 38], true);
+    assert_eq!(frets(&doc), [(0, 0), (5, 2)]);
+
+    // A pitch its own string can no longer reach moves to the nearest free one;
+    // one no string reaches is dropped.
+    let mut doc = one_event(&[(5, 0), (4, 0), (0, 24)]);
+    doc.retune(Instrument::Bass, vec![43, 38, 33, 28], true);
+    // Guitar low E (40) = bass E string fret 12 (index 3); guitar A (45) = bass A
+    // string fret 12 (index 2); the guitar's 88 is past the bass's 24th fret.
+    assert_eq!(frets(&doc), [(2, 12), (3, 12)]);
+}
+
 const V1_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v1.gtab");
 
 #[test]
@@ -185,7 +257,9 @@ fn v1_fixture_loads_as_the_expected_document() {
         format_version: 1,
         title: "V1 Fixture".to_string(),
         author: String::new(),
-        tuning: [64, 59, 55, 50, 45, 40],
+        instrument: Instrument::Guitar,
+        tuning: vec![64, 59, 55, 50, 45, 40],
+        tuning_label: TuningLabel::Hidden,
         capo: 0,
         tempo: 120,
         tab_scale: 1.0,
@@ -954,6 +1028,22 @@ fn the_live_strip_puts_every_bar_on_one_line() {
     // highlights a column by taking the union of an event's six.
     let events: usize = doc.bars.iter().map(|b| b.events.len()).sum();
     assert_eq!(strip.hits.len(), events * 6);
+
+    // A bass has four lines: four cells per event, and a staff two string gaps
+    // shorter.
+    let mut bass = doc.clone();
+    bass.retune(
+        Instrument::Bass,
+        Instrument::Bass.default_tuning().to_vec(),
+        false,
+    );
+    let bass_strip = layout::strip(&bass);
+    assert_eq!(bass_strip.hits.len(), events * 4);
+    let shorter = strip.height - bass_strip.height;
+    assert!(
+        (shorter - 2.0 * grat::tablature::STRING_MM).abs() < 0.01,
+        "{shorter}"
+    );
 
     // Every event has a place on the line, and they run left to right.
     let xs: Vec<f32> = doc

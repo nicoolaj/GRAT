@@ -320,7 +320,7 @@ fn page_proof_sheet() {
             ],
             color: grat::Rgb(0xFF, 0xFF, 0xFF),
         });
-        prims.extend(page.prims.iter().cloned().map(|p| shift(p, dx)));
+        prims.extend(page.prims.iter().cloned().map(|p| shift(p, dx, 0.0)));
     }
 
     assert!(
@@ -337,11 +337,107 @@ fn page_proof_sheet() {
     eprintln!("wrote dist/page-preview.svg — {} pages", pages.len());
 }
 
-/// Move a primitive sideways, to place whole pages next to each other.
-fn shift(p: Prim, dx: f32) -> Prim {
+/// A short piece on each instrument, one page each side by side: the string count
+/// drives the tab's lines, repeat dots, "TAB" and time signature; the instrument
+/// the clef; `tuning_label` where the open strings are named.
+#[test]
+fn instruments_proof_sheet() {
+    let piece = |instrument: Instrument, strings: usize, label: TuningLabel| {
+        let mut doc = Document::new_empty();
+        let tuning = instrument
+            .tunings()
+            .find(|t| t.notes.len() == strings)
+            .unwrap()
+            .notes
+            .to_vec();
+        doc.retune(instrument, tuning, false);
+        doc.title = format!("{instrument:?} {strings}");
+        doc.tuning_label = label;
+        doc.rows = vec![Row::Chords, Row::Tab, Row::Notation];
+        doc.bars = (0..4)
+            .map(|b| Bar {
+                events: (0..strings)
+                    .map(|s| Event {
+                        dur: Dur {
+                            base: NoteValue::Quarter,
+                            dots: 0,
+                        },
+                        notes: vec![Note {
+                            string: s as u8,
+                            fret: (b * 2 + s) as u8 % 7,
+                            tech: Technique::Plain,
+                            tie_next: false,
+                        }],
+                        ..Default::default()
+                    })
+                    .collect(),
+                time_sig: (b == 0).then_some((strings as u8, 4)),
+                repeat_start: b == 1,
+                repeat_end: (b == 2).then_some(2),
+            })
+            .collect();
+        doc
+    };
+    let docs = [
+        piece(Instrument::Bass, 4, TuningLabel::Strings { letters: true }),
+        piece(
+            Instrument::Ukulele,
+            4,
+            TuningLabel::Strings { letters: false },
+        ),
+        piece(Instrument::Banjo, 5, TuningLabel::Header { letters: false }),
+        piece(Instrument::Guitar, 8, TuningLabel::Header { letters: true }),
+    ];
+
+    let gap = 8.0;
+    let mut prims = Vec::new();
+    for (i, doc) in docs.iter().enumerate() {
+        let page = &grat::layout::paginate(doc)[0];
+        let events: usize = doc.bars.iter().map(|b| b.events.len()).sum();
+        // Every bar's events, plus the trailing blank bars' own cells.
+        assert_eq!(
+            page.hits.len() % doc.tuning.len(),
+            0,
+            "{}: one cell per string per event",
+            doc.title
+        );
+        assert!(page.hits.len() >= events * doc.tuning.len());
+        // Two by two, so the sheet stays close to square for a thumbnailer.
+        let (dx, dy) = (
+            (i % 2) as f32 * (210.0 + gap),
+            (1 - i / 2) as f32 * (297.0 + gap),
+        );
+        prims.push(Prim::Poly {
+            pts: vec![
+                P { x: dx, y: dy },
+                P {
+                    x: dx + 210.0,
+                    y: dy,
+                },
+                P {
+                    x: dx + 210.0,
+                    y: dy + 297.0,
+                },
+                P {
+                    x: dx,
+                    y: dy + 297.0,
+                },
+            ],
+            color: grat::Rgb(0xFF, 0xFF, 0xFF),
+        });
+        prims.extend(page.prims.iter().cloned().map(|p| shift(p, dx, dy)));
+    }
+    std::fs::create_dir_all("dist").ok();
+    let (width, height) = (2.0 * 210.0 + gap, 2.0 * 297.0 + gap);
+    std::fs::write("dist/instruments-preview.svg", svg(&prims, width, height)).unwrap();
+    eprintln!("wrote dist/instruments-preview.svg");
+}
+
+/// Move a primitive, to place whole pages next to each other.
+fn shift(p: Prim, dx: f32, dy: f32) -> Prim {
     let m = |q: P| P {
         x: q.x + dx,
-        y: q.y,
+        y: q.y + dy,
     };
     match p {
         Prim::Line { a, b, w, color } => Prim::Line {
@@ -387,9 +483,9 @@ fn shift(p: Prim, dx: f32) -> Prim {
 
 #[test]
 fn chord_names_are_recognised() {
-    let doc = Document::new_empty();
-    // (string, fret) pairs, string 0 = high E.
-    let name = |frets: &[(u8, u8)]| {
+    let guitar = Document::new_empty();
+    // (string, fret) pairs, string 0 = the top line.
+    let name_on = |doc: &Document, frets: &[(u8, u8)]| {
         let event = Event {
             notes: frets
                 .iter()
@@ -402,8 +498,9 @@ fn chord_names_are_recognised() {
                 .collect(),
             ..Event::default()
         };
-        tablature::chord_name(&doc, &event)
+        tablature::chord_name(doc, &event)
     };
+    let name = |frets: &[(u8, u8)]| name_on(&guitar, frets);
     // This binary's only language user; smoke.rs flips the global language.
     grat::i18n::set_lang("en");
     assert_eq!(
@@ -426,4 +523,28 @@ fn chord_names_are_recognised() {
     );
     assert_eq!(name(&[(0, 3)]), None);
     assert_eq!(name(&[]), None);
+
+    // The chord follows the tuning: the three open bass strings are the drop-D
+    // power chord, where standard tuning makes them a suspended chord over E.
+    let open_three = [(5, 0), (4, 0), (3, 0)];
+    assert_eq!(name(&open_three).as_deref(), Some("Dsus2/E"));
+    let mut drop_d = guitar.clone();
+    drop_d.tuning = vec![64, 59, 55, 50, 45, 38];
+    assert_eq!(name_on(&drop_d, &open_three).as_deref(), Some("D5"));
+    // A re-entrant ukulele's lowest note is the C string, not a bass: 2000 is
+    // Am, not Am/C. 0003 is plain C either way.
+    let mut uke = guitar.clone();
+    uke.retune(
+        Instrument::Ukulele,
+        Instrument::Ukulele.default_tuning().to_vec(),
+        false,
+    );
+    assert_eq!(
+        name_on(&uke, &[(3, 2), (2, 0), (1, 0), (0, 0)]).as_deref(),
+        Some("Am")
+    );
+    assert_eq!(
+        name_on(&uke, &[(3, 0), (2, 0), (1, 0), (0, 3)]).as_deref(),
+        Some("C")
+    );
 }

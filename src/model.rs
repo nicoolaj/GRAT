@@ -33,7 +33,19 @@ pub const TICKS_WHOLE: u32 = 3840;
 /// v3 replaced the `model` (one/two/three lines) and `staff_order` fields with
 /// `rows`, an ordered list of [`Row`]s; [`Document::from_json`] rewrites the old
 /// pair on load.
-pub const FORMAT_VERSION: u32 = 3;
+///
+/// v4 turned `tuning` from exactly six open strings into any number of them (a
+/// bass has four, a banjo five) and added `instrument` and `tuning_label`. The
+/// array reads the same either way, so nothing is migrated; the bump is so a
+/// pre-v4 build calls a four-string file too new rather than corrupt.
+pub const FORMAT_VERSION: u32 = 4;
+
+/// Most strings a document may carry. Guards `from_json` against a hand-edited
+/// tuning; the presets top out at eight.
+pub const MAX_STRINGS: usize = 10;
+
+/// Highest fret a re-fretted note may land on.
+const MAX_FRET: i32 = 24;
 
 fn default_format_version() -> u32 {
     1
@@ -296,7 +308,8 @@ impl Technique {
 // to read. Upgrade path is that hand-written impl, if size ever outweighs readability.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
-    /// 0 = string 1 (high E, top line of the tab) .. 5 = string 6 (low E, bottom line).
+    /// Index into [`Document::tuning`]: 0 = string 1, the top line of the tab
+    /// (a guitar's high E) .. `tuning.len() - 1`, the bottom line.
     pub string: u8,
     pub fret: u8,
     #[serde(default, skip_serializing_if = "is_default")]
@@ -408,7 +421,8 @@ impl Bar {
 /// shows, top to bottom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Row {
-    /// The six-string staff. Always present: its cells are what the editor clicks.
+    /// The tablature staff, one line per string. Always present: its cells are
+    /// what the editor clicks.
     Tab,
     /// Stems, beams and rests on their own, with no pitch.
     Rhythm,
@@ -454,6 +468,111 @@ fn legacy_rows(model: &str, notation_first: bool) -> Vec<Row> {
     rows
 }
 
+/// The instrument a document is written for. It picks the notation clef and
+/// which [`TUNINGS`] the menus offer; the strings themselves are
+/// [`Document::tuning`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Instrument {
+    #[default]
+    Guitar,
+    Bass,
+    Ukulele,
+    BaritoneGuitar,
+    BaritoneUkulele,
+    Banjo,
+    Mandolin,
+}
+
+impl Instrument {
+    pub const ALL: [Instrument; 7] = [
+        Instrument::Guitar,
+        Instrument::Bass,
+        Instrument::Ukulele,
+        Instrument::BaritoneGuitar,
+        Instrument::BaritoneUkulele,
+        Instrument::Banjo,
+        Instrument::Mandolin,
+    ];
+
+    /// This instrument's presets, in menu order.
+    pub fn tunings(self) -> impl Iterator<Item = &'static Tuning> {
+        TUNINGS.iter().filter(move |t| t.instrument == self)
+    }
+
+    /// The string counts its presets come in, in table order: 6, 7, 8 for a guitar.
+    pub fn string_counts(self) -> Vec<usize> {
+        let mut counts: Vec<usize> = Vec::new();
+        for t in self.tunings() {
+            if !counts.contains(&t.notes.len()) {
+                counts.push(t.notes.len());
+            }
+        }
+        counts
+    }
+
+    /// The first preset: what choosing this instrument tunes to.
+    pub fn default_tuning(self) -> &'static [u8] {
+        self.tunings().next().map_or(STANDARD_GUITAR, |t| t.notes)
+    }
+}
+
+/// One named preset: MIDI open strings, index 0 = string 1 (the top tab line).
+pub struct Tuning {
+    pub instrument: Instrument,
+    /// i18n key of the preset's name.
+    pub key: &'static str,
+    pub notes: &'static [u8],
+}
+
+const STANDARD_GUITAR: &[u8] = &[64, 59, 55, 50, 45, 40];
+
+/// Every preset the Edit menu offers. An instrument's first row is its default;
+/// the first row of each string count is what picking that count tunes to.
+#[rustfmt::skip]
+pub const TUNINGS: &[Tuning] = &[
+    Tuning { instrument: Instrument::Guitar, key: "tuning.standard", notes: STANDARD_GUITAR },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.drop_d", notes: &[64, 59, 55, 50, 45, 38] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.half_down", notes: &[63, 58, 54, 49, 44, 39] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.whole_down", notes: &[62, 57, 53, 48, 43, 38] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.drop_c", notes: &[62, 57, 53, 48, 43, 36] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.open_g", notes: &[62, 59, 55, 50, 43, 38] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.open_d", notes: &[62, 57, 54, 50, 45, 38] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.open_e", notes: &[64, 59, 56, 52, 47, 40] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.open_c", notes: &[64, 60, 55, 48, 43, 36] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.dadgad", notes: &[62, 57, 55, 50, 45, 38] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.standard", notes: &[64, 59, 55, 50, 45, 40, 35] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.drop_a", notes: &[64, 59, 55, 50, 45, 40, 33] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.standard", notes: &[64, 59, 55, 50, 45, 40, 35, 30] },
+    Tuning { instrument: Instrument::Guitar, key: "tuning.drop_e", notes: &[64, 59, 55, 50, 45, 40, 35, 28] },
+    Tuning { instrument: Instrument::Bass, key: "tuning.standard", notes: &[43, 38, 33, 28] },
+    Tuning { instrument: Instrument::Bass, key: "tuning.drop_d", notes: &[43, 38, 33, 26] },
+    Tuning { instrument: Instrument::Bass, key: "tuning.half_down", notes: &[42, 37, 32, 27] },
+    Tuning { instrument: Instrument::Bass, key: "tuning.standard", notes: &[43, 38, 33, 28, 23] },
+    Tuning { instrument: Instrument::Bass, key: "tuning.high_c", notes: &[48, 43, 38, 33, 28] },
+    Tuning { instrument: Instrument::Bass, key: "tuning.standard", notes: &[48, 43, 38, 33, 28, 23] },
+    Tuning { instrument: Instrument::Ukulele, key: "tuning.standard", notes: &[69, 64, 60, 67] },
+    Tuning { instrument: Instrument::Ukulele, key: "tuning.low_g", notes: &[69, 64, 60, 55] },
+    Tuning { instrument: Instrument::Ukulele, key: "tuning.d_tuning", notes: &[71, 66, 62, 69] },
+    Tuning { instrument: Instrument::BaritoneGuitar, key: "tuning.b_standard", notes: &[59, 54, 50, 45, 40, 35] },
+    Tuning { instrument: Instrument::BaritoneGuitar, key: "tuning.a_standard", notes: &[57, 52, 48, 43, 38, 33] },
+    Tuning { instrument: Instrument::BaritoneUkulele, key: "tuning.standard", notes: &[64, 59, 55, 50] },
+    Tuning { instrument: Instrument::Banjo, key: "tuning.open_g", notes: &[62, 59, 55, 50, 67] },
+    Tuning { instrument: Instrument::Banjo, key: "tuning.double_c", notes: &[62, 60, 55, 48, 67] },
+    Tuning { instrument: Instrument::Banjo, key: "tuning.open_d", notes: &[62, 57, 54, 50, 66] },
+    Tuning { instrument: Instrument::Mandolin, key: "tuning.standard", notes: &[76, 69, 62, 55] },
+];
+
+/// Whether, and how, the page names the open strings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TuningLabel {
+    #[default]
+    Hidden,
+    /// One line under the title, lowest string first.
+    Header { letters: bool },
+    /// A name on each string line at the head of every tablature staff.
+    Strings { letters: bool },
+}
+
 /// A complete tablature document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -467,10 +586,15 @@ pub struct Document {
     pub title: String,
     #[serde(default, skip_serializing_if = "is_default")]
     pub author: String,
-    /// MIDI note numbers of the open strings, index 0 = string 1 (high E) .. index 5 =
-    /// string 6 (low E).
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub instrument: Instrument,
+    /// MIDI note numbers of the open strings, one per tab line: index 0 = string 1
+    /// (the top line) .. the bottom line. Never empty, at most [`MAX_STRINGS`], and
+    /// every note's `string` indexes into it — `from_json` refuses anything else.
     #[serde(default = "default_tuning", skip_serializing_if = "is_std_tuning")]
-    pub tuning: [u8; 6],
+    pub tuning: Vec<u8>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub tuning_label: TuningLabel,
     #[serde(default, skip_serializing_if = "is_default")]
     pub capo: u8,
     #[serde(default = "default_tempo", skip_serializing_if = "is_default_tempo")]
@@ -511,8 +635,8 @@ fn is_default_tempo(v: &u16) -> bool {
     *v == 120
 }
 
-fn is_std_tuning(v: &[u8; 6]) -> bool {
-    *v == [64, 59, 55, 50, 45, 40]
+fn is_std_tuning(v: &[u8]) -> bool {
+    v == STANDARD_GUITAR
 }
 
 fn is_unit_scale(v: &f32) -> bool {
@@ -526,8 +650,8 @@ fn current_version<S: serde::Serializer>(_: &u32, serializer: S) -> Result<S::Ok
     serializer.serialize_u32(FORMAT_VERSION)
 }
 
-fn default_tuning() -> [u8; 6] {
-    [64, 59, 55, 50, 45, 40]
+fn default_tuning() -> Vec<u8> {
+    STANDARD_GUITAR.to_vec()
 }
 
 fn default_tempo() -> u16 {
@@ -575,6 +699,19 @@ impl Document {
             }
         }
         let mut doc: Document = serde_json::from_value(json).map_err(|_| LoadError::Parse)?;
+        // A hand-edited tuning could leave a note with no string to sound on, and
+        // `pitch` indexes the tuning with it.
+        let strings = doc.tuning.len();
+        if !(1..=MAX_STRINGS).contains(&strings)
+            || doc
+                .bars
+                .iter()
+                .flat_map(|b| &b.events)
+                .flat_map(|e| &e.notes)
+                .any(|n| n.string as usize >= strings)
+        {
+            return Err(LoadError::Parse);
+        }
         // A hand-edited file could drop the tab; without it nothing is clickable.
         if !doc.rows.contains(&Row::Tab) {
             doc.rows.insert(0, Row::Tab);
@@ -593,6 +730,68 @@ impl Document {
     /// Sounding MIDI pitch of `note`, given this document's tuning and capo.
     pub fn pitch(&self, note: &Note) -> u8 {
         self.tuning[note.string as usize] + note.fret + self.capo
+    }
+
+    /// True when some string sounds higher than the one drawn above it — a
+    /// ukulele's high G, a banjo's short fifth string. The lowest note of a chord
+    /// is then not necessarily its bass.
+    pub fn is_reentrant(&self) -> bool {
+        self.tuning.windows(2).any(|w| w[0] < w[1])
+    }
+
+    /// Switch to `instrument` with open strings `tuning`.
+    ///
+    /// With `keep_pitches` false the tablature stays as written: every note keeps
+    /// its string and fret, and so sounds whatever the new tuning makes of it;
+    /// notes on strings that no longer exist are dropped. With `keep_pitches` true
+    /// every note is re-fretted to sound as before, on its own string when that
+    /// still reaches the pitch within [`MAX_FRET`], otherwise on the nearest free
+    /// string that does; a note no string can play is dropped.
+    ///
+    /// ponytail: greedy, one note at a time in string order, not an optimal
+    /// assignment of a chord to strings, and a tie or legato pair can split across
+    /// two strings. A matching over each event's notes if a real voicing ever
+    /// comes out wrong.
+    pub fn retune(&mut self, instrument: Instrument, tuning: Vec<u8>, keep_pitches: bool) {
+        let old = std::mem::replace(&mut self.tuning, tuning);
+        self.instrument = instrument;
+        let strings = self.tuning.len();
+        for event in self.bars.iter_mut().flat_map(|b| &mut b.events) {
+            if !keep_pitches {
+                event.notes.retain(|n| (n.string as usize) < strings);
+                continue;
+            }
+            let mut placed: Vec<Note> = Vec::with_capacity(event.notes.len());
+            for mut note in std::mem::take(&mut event.notes) {
+                let pitch = i32::from(old[note.string as usize]) + i32::from(note.fret);
+                let from = i32::from(note.string);
+                let mut order: Vec<usize> = (0..strings).collect();
+                order.sort_by_key(|&s| (s as i32 - from).abs());
+                let Some(s) = order.into_iter().find(|&s| {
+                    (0..=MAX_FRET).contains(&(pitch - i32::from(self.tuning[s])))
+                        && !placed.iter().any(|p| p.string as usize == s)
+                }) else {
+                    continue;
+                };
+                let fret = pitch - i32::from(self.tuning[s]);
+                let shift =
+                    |f: u8| (i32::from(f) + fret - i32::from(note.fret)).clamp(0, MAX_FRET) as u8;
+                note.tech = match note.tech {
+                    Technique::SlideIn { from_fret } => Technique::SlideIn {
+                        from_fret: shift(from_fret),
+                    },
+                    Technique::Trill { to_fret } => Technique::Trill {
+                        to_fret: shift(to_fret),
+                    },
+                    other => other,
+                };
+                note.string = s as u8;
+                note.fret = fret as u8;
+                placed.push(note);
+            }
+            placed.sort_by_key(|n| n.string);
+            event.notes = placed;
+        }
     }
 
     /// Time signature in effect at `bar_index`, resolving inheritance from earlier bars.
@@ -615,7 +814,9 @@ impl Document {
             format_version: FORMAT_VERSION,
             title: String::new(),
             author: String::new(),
+            instrument: Instrument::Guitar,
             tuning: default_tuning(),
+            tuning_label: TuningLabel::Hidden,
             capo: 0,
             tempo: default_tempo(),
             tab_scale: default_scale(),

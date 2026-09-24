@@ -1,7 +1,7 @@
 # GRAT — guide for Claude and other agents
 
-GRAT is a desktop editor for six-string guitar tablature: place notes by mouse, save as JSON, print an
-A4 PDF. Rust, `eframe`/`egui`, one portable binary (macOS/Windows/Linux, ARM and x86).
+GRAT is a desktop editor for fretted-instrument tablature (guitar, bass, ukulele, banjo, mandolin;
+any string count the preset table offers): place notes by mouse, save as JSON, print an A4 PDF. Rust, `eframe`/`egui`, one portable binary (macOS/Windows/Linux, ARM and x86).
 
 Author: Nicolas Jalibert <nicoolaj@gmail.com> — https://github.com/nicoolaj
 Licence: CC BY-NC-SA 4.0 (see `LICENSE`). Reuse and modification are welcome; commercial use is
@@ -41,12 +41,12 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 
 | File | Does |
 |---|---|
-| `model.rs` | `Document` / `Bar` / `Event` / `Note`, note values in ticks, techniques and their colours, serde |
+| `model.rs` | `Document` / `Bar` / `Event` / `Note`, note values in ticks, techniques and their colours, instruments and the `TUNINGS` preset table, `retune` (keep frets or keep pitches), serde |
 | `i18n.rs` + `i18n/*.json` | locale detection, `t(key)`, note and rest names (they differ FR/US) |
 | `engrave.rs` | rhythm only: beat grouping, beams, proportional spacing, justification, and the print normalisation (`for_export`: merge rests, split notes straddling a beat into tied pieces). No pitch, no glyphs |
 | `staff.rs` | furniture both rows share: barlines and repeats, rests, arrowheads, waves, text metrics |
-| `notation.rs` | the five-line staff: clef, heads, stems, beams, accidentals, ties, ledger lines |
-| `tablature.rs` | the tablature row: string lines, fret labels, all 20 technique glyphs; and the strum, rhythm and chord-name rows (chord recognition included) |
+| `notation.rs` | the five-line staff: clef (treble 8vb, treble or bass 8vb by instrument), heads, stems, beams, accidentals, ties, ledger lines |
+| `tablature.rs` | the tablature row: one line per string (`doc.tuning.len()`), fret labels, all 20 technique glyphs, the optional string names; and the strum, rhythm and chord-name rows (chord recognition included, re-entrant tunings never write a slash bass) |
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, hit boxes |
 | `decorations.rs` | calendar decorations for the logo (confetti, flags, pumpkins...): the date → `Decoration` table, its shape vocabulary, and `bake`, the pixel rasterizer that stamps one into the dock/taskbar icon's raw RGBA. GUI-free like the rest of the library; its live, on-screen counterpart is `canvas::paint_decoration` |
 | `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette, and the live rendering of a `decorations::Decoration` (`paint_decoration`) |
@@ -218,6 +218,19 @@ again only when the old and new shapes are this cleanly distinguishable on sight
 object); anything murkier belongs in the probe-then-migrate seam instead. `exemples/*.gtab` are
 kept as unversioned v1 files on purpose — `make examples` re-reads them on every run, which makes
 them a free, permanent v1-compatibility check. Do not "upgrade" them to v2.
+
+The v3 → v4 bump (`tuning` from `[u8; 6]` to `Vec<u8>`, plus `instrument` and `tuning_label`)
+needed no migration either: a JSON array reads as both. It was bumped anyway so a pre-v4 build
+reports a four-string file as too new instead of as corrupt. `from_json` refuses an empty tuning,
+one over `MAX_STRINGS`, or a note on a string the tuning lacks — `Document::pitch` indexes the
+tuning with `note.string`, so that is the invariant every loaded document keeps. The editor keeps
+it too: `retune` drops notes that lose their string, and `paste` skips them.
+
+**Add an instrument or a tuning preset.** A row in `model::TUNINGS` (index 0 = the top tab line);
+an instrument's first row is its default, and the first row of each length is what the string-count
+menu tunes to. A new preset name is a `tuning.*` key in both language files. A new instrument is a
+`model::Instrument` variant, its arm in `notation::clef` and in `main.rs`'s `instrument_label`, and
+an `instrument.*` key.
 
 **Change how something is engraved.** Everything rhythmic (what gets beamed, how wide a note is) is
 in `engrave.rs` and is unit-tested in `tests/engraving.rs`. Everything visual is in `notation.rs` /
