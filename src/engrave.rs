@@ -576,21 +576,94 @@ pub fn refit(bar: &mut Bar, time_sig: (u8, u8)) {
 }
 
 /// Set bar `bar_index`'s time signature (`None` reverts to inheriting from
-/// whatever came before) and refit it and every bar it governs, stopping at the
-/// next bar that names its own signature.
+/// whatever came before) and reflow the section it governs -- up to the next bar
+/// that names its own signature -- into bars of the new length, keeping every
+/// event at the same moment of the piece. Going from 4/4 to 2/4 doubles the bars
+/// of that section instead of cutting each one in half.
+///
+/// A note that ends up straddling a new barline is shortened to what fits and
+/// the rest of its time becomes rests, so everything after it keeps its onset.
+/// ponytail: the cut-off part is silence, not a tied continuation -- ties across
+/// a barline are out of scope for v1; carry it as a tied note once they exist.
 pub fn set_time_sig(doc: &mut Document, bar_index: usize, sig: Option<(u8, u8)>) {
-    let Some(bar) = doc.bars.get_mut(bar_index) else {
+    if bar_index >= doc.bars.len() {
         return;
-    };
-    bar.time_sig = sig;
-
-    for i in bar_index..doc.bars.len() {
-        if i > bar_index && doc.bars[i].time_sig.is_some() {
-            break; // that bar starts its own section
-        }
-        let effective = doc.time_sig_at(i); // read before the &mut below -- borrowck
-        refit(&mut doc.bars[i], effective);
     }
+    let end = (bar_index + 1..doc.bars.len())
+        .find(|&i| doc.bars[i].time_sig.is_some())
+        .unwrap_or(doc.bars.len());
+    let old_caps: Vec<u32> = (bar_index..end)
+        .map(|i| bar_ticks(doc.time_sig_at(i)))
+        .collect();
+    let old: Vec<Bar> = doc.bars.drain(bar_index..end).collect();
+    let new_sig = sig.unwrap_or_else(|| match bar_index {
+        0 => (4, 4),
+        i => doc.time_sig_at(i - 1),
+    });
+    let cap = bar_ticks(new_sig).max(1);
+
+    let rests = |ticks: u32| {
+        split_ticks(ticks).into_iter().map(|dur| Event {
+            dur,
+            ..Default::default()
+        })
+    };
+    // The section as one stream, a short old bar padded so it still spans its
+    // full length -- every event keeps its onset from the start of the section.
+    let stream = old.iter().zip(&old_caps).flat_map(|(bar, &old_cap)| {
+        let played: u32 = bar.events.iter().map(|e| e.dur.ticks()).sum();
+        bar.events
+            .iter()
+            .cloned()
+            .chain(rests(old_cap.saturating_sub(played)))
+    });
+
+    let mut out: Vec<Bar> = Vec::new();
+    let mut t = 0u32; // ticks from the start of the section
+    for e in stream {
+        let mut ticks = e.dur.ticks();
+        let mut first = true;
+        while ticks > 0 {
+            if t / cap >= out.len() as u32 {
+                out.push(Bar::default());
+            }
+            let take = ticks.min(cap - t % cap);
+            let events = &mut out.last_mut().expect("pushed above").events;
+            match split_ticks(take).first() {
+                _ if first && take == ticks => events.push(e.clone()),
+                Some(&dur) if first && !e.is_rest() => {
+                    events.push(Event { dur, ..e.clone() });
+                    events.extend(rests(take - dur.ticks()));
+                }
+                _ => events.extend(rests(take)),
+            }
+            first = false;
+            ticks -= take;
+            t += take;
+        }
+    }
+    if out.is_empty() {
+        out.push(Bar::default());
+    }
+
+    // Repeat signs follow the moment they marked.
+    let mut start = 0u32;
+    for (bar, &old_cap) in old.iter().zip(&old_caps) {
+        let last = ((start + old_cap).saturating_sub(1) / cap) as usize;
+        if let Some(b) = out.get_mut((start / cap) as usize) {
+            b.repeat_start |= bar.repeat_start;
+        }
+        if let (Some(b), Some(n)) = (out.get_mut(last), bar.repeat_end) {
+            b.repeat_end = Some(n);
+        }
+        start += old_cap;
+    }
+
+    out[0].time_sig = sig;
+    for bar in &mut out {
+        refit(bar, new_sig); // pads the last bar, and any tick `split_ticks` couldn't name
+    }
+    doc.bars.splice(bar_index..bar_index, out);
 }
 
 /// Normalise a document for printing: the editor's convenient one-rest-per-beat

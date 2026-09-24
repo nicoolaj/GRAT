@@ -550,6 +550,74 @@ fn set_time_sig_refits_every_bar_it_governs() {
 }
 
 #[test]
+fn set_time_sig_reflows_notes_instead_of_dropping_them() {
+    // 4/4 -> 2/4: two bars become four, every note kept, in order.
+    let mut doc = two_bars_of_distinct_quarters();
+    doc.bars[1].repeat_end = Some(2);
+    set_time_sig(&mut doc, 0, Some((2, 4)));
+    assert_eq!(doc.bars.len(), 4);
+    let frets: Vec<u8> = doc
+        .bars
+        .iter()
+        .flat_map(|b| &b.events)
+        .flat_map(|e| &e.notes)
+        .map(|n| n.fret)
+        .collect();
+    assert_eq!(frets, (0..8).collect::<Vec<_>>());
+    assert!(doc.bars.iter().all(|b| is_complete(b, (2, 4))));
+    assert_eq!(
+        doc.bars[3].repeat_end,
+        Some(2),
+        "repeat sign follows the music"
+    );
+
+    // And back: 2/4 -> 4/4 merges them again.
+    set_time_sig(&mut doc, 0, Some((4, 4)));
+    assert_eq!(doc.bars.len(), 2);
+    assert_eq!(total_notes(&doc), 8);
+    assert_eq!(doc, two_bars_of_distinct_quarters_with_repeat());
+}
+
+fn two_bars_of_distinct_quarters_with_repeat() -> Document {
+    let mut doc = two_bars_of_distinct_quarters();
+    doc.bars[1].repeat_end = Some(2);
+    doc
+}
+
+#[test]
+fn set_time_sig_stops_at_the_next_signature_and_keeps_onsets() {
+    // 4/4: half(0) quarter(1) quarter(2) | 3/4 bar that must not move.
+    let mut doc = doc_with(Bar {
+        events: vec![
+            ev(NoteValue::Quarter, vec![note(0)]),
+            ev(NoteValue::Half, vec![note(1)]),
+            ev(NoteValue::Quarter, vec![note(2)]),
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    doc.bars.push(Bar {
+        events: vec![ev(NoteValue::Quarter, vec![note(9)]); 3],
+        time_sig: Some((3, 4)),
+        ..Default::default()
+    });
+    set_time_sig(&mut doc, 0, Some((2, 4)));
+
+    // The half note straddles the new barline: cut to what fits, and the
+    // quarter after it still starts on beat 4.
+    assert_eq!(doc.bars.len(), 3);
+    assert_eq!(doc.bars[0].events.len(), 2);
+    assert_eq!(
+        doc.bars[0].events[1].dur.ticks(),
+        NoteValue::Quarter.ticks()
+    );
+    assert!(doc.bars[1].events[0].is_rest());
+    assert_eq!(doc.bars[1].events[1].notes[0].fret, 2);
+    assert_eq!(doc.bars[2].time_sig, Some((3, 4)));
+    assert_eq!(doc.bars[2].events.len(), 3);
+}
+
+#[test]
 fn split_ticks_terminates_on_an_unrepresentable_remainder() {
     // 225 ticks has no exact undotted decomposition; the greedy loop must stop
     // rather than spin, and must never hand back more than it was given.
