@@ -820,11 +820,11 @@ fn time_signature(x: f32, y0: f32, sp: f32, sig: (u8, u8), out: &mut Vec<Prim>) 
 /// the way an engraved clef does.
 ///
 /// The spiral is geometric: one and a half clockwise turns from a dot on the G
-/// line, its radius `r = R0 + (R - R0)·(2u - u²)` in the fraction `u` of the way
-/// round — opening evenly, then easing to a constant so the last half turn is the
-/// round outer loop and the upstroke leaves it tangentially at the left. The rest
-/// of the glyph is a spline through points measured off a classic engraved clef:
-/// the belly crosses the stem just above the third line, and the head is a narrow,
+/// line, its radius `r = R0 + (R - R0)·u` opening evenly in the fraction `u` of the
+/// way round, so the inner turn stays small enough for the belly to pass over it.
+/// The rest of the glyph is a spline through points measured off a classic engraved
+/// clef: the belly rises from the spiral's left edge round lines one to three and
+/// crosses the stem on the third line, and the head is a narrow,
 /// pointed loop standing about a space and a half over the staff — the reason the
 /// row reserves 14 mm above its baseline.
 ///
@@ -842,14 +842,14 @@ fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
     // (x, y, width) from the spiral's end: a Catmull-Rom spline runs through them.
     const PATH: [[f32; 3]; 24] = [
         [-1.05, 0.00, 0.22],
-        [-1.04, 0.50, 0.35], // the thick left side rising into the upstroke
-        [-0.80, 0.92, 0.42],
-        [-0.40, 1.25, 0.46],
-        [0.21, 1.52, 0.50], // crosses the stem just above the third line
-        [0.52, 1.90, 0.45],
-        [0.72, 2.35, 0.37],
-        [0.80, 2.85, 0.26],
-        [0.76, 3.35, 0.16],
+        [-0.98, 0.50, 0.35], // the thick left side of the belly
+        [-0.68, 0.86, 0.42],
+        [-0.22, 1.04, 0.46],
+        [0.27, 1.00, 0.50], // crosses the stem on the third line
+        [0.62, 1.28, 0.45],
+        [0.80, 1.80, 0.37],
+        [0.84, 2.40, 0.26],
+        [0.78, 3.00, 0.16],
         [0.62, 3.80, 0.24],
         [0.42, 4.18, 0.40], // the apex, a space and a half over the top line
         [0.24, 3.95, 0.32],
@@ -880,7 +880,7 @@ fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
     for i in 0..=SPIRAL_STEPS {
         let u = i as f32 / SPIRAL_STEPS as f32;
         let turns = TURNS * u;
-        let r = R0 + (R - R0) * (2.0 * u - u * u);
+        let r = R0 + (R - R0) * u;
         let phi = std::f32::consts::TAU * turns; // clockwise from three o'clock
         let q = turns * 4.0;
         let k = (q as usize).min(SPIRAL_W.len() - 2);
