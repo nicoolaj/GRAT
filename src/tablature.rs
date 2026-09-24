@@ -855,15 +855,15 @@ pub fn render_strum(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<
                 });
             };
             match strum {
-                // Down-stroke: the open-bottomed bracket players read as "down".
+                // A plain vertical arrow, like a keyboard's arrow key: the shaft
+                // stops short of the tip so the filled head carries the point.
                 Strum::Down => {
-                    line(x - 0.9, hi, x + 0.9, hi);
-                    line(x - 0.9, hi, x - 0.9, lo);
-                    line(x + 0.9, hi, x + 0.9, lo);
+                    line(x, hi, x, lo + 0.9);
+                    arrow_head(P { x, y: lo }, 0.0, -1.0, 1.1, INK, out);
                 }
                 Strum::Up => {
-                    line(x - 0.95, hi, x, lo);
-                    line(x + 0.95, hi, x, lo);
+                    line(x, lo, x, hi - 0.9);
+                    arrow_head(P { x, y: hi }, 0.0, 1.0, 1.1, INK, out);
                 }
                 Strum::TapRight | Strum::TapLeft => {
                     out.push(Prim::Text {
