@@ -98,6 +98,78 @@ pub fn natural_bar_width(bar: &Bar, h: f32) -> f32 {
     BAR_GAP_MM * h + events + lead_in
 }
 
+/// Width of one time-signature digit, the widest the rows print (the tablature's).
+const TIME_SIG_DIGIT_MM: f32 = 3.9;
+
+/// Digits of the wider half of a time signature: 12/8 is two wide.
+fn time_sig_digits(sig: (u8, u8)) -> f32 {
+    sig.0.max(sig.1).to_string().len() as f32
+}
+
+/// The signature bar `index` has to print: the piece's first, or a change.
+fn time_sig_mark(doc: &Document, index: usize) -> Option<(u8, u8)> {
+    let sig = doc.time_sig_at(index.min(doc.bars.len().checked_sub(1)?));
+    match index {
+        0 => Some(sig),
+        i if i < doc.bars.len() && doc.time_sig_at(i - 1) != sig => Some(sig),
+        _ => None,
+    }
+}
+
+/// Whether a signature fits the staff head, left of a system's first barline.
+/// A two-digit one (12/8) would run into the clef, so it stands after the
+/// barline instead, like a change inside the system.
+fn fits_margin(sig: (u8, u8)) -> bool {
+    time_sig_digits(sig) <= 1.0
+}
+
+/// Room a time signature claims right after bar `index`'s opening barline, or 0
+/// where none prints there. The rows draw the digits in it, centred
+/// [`time_sig_offset`] past the barline. When the bar opens a system its
+/// signature usually sits in the margin instead and claims nothing.
+pub fn time_sig_lead(doc: &Document, index: usize, opens_system: bool) -> f32 {
+    match time_sig_mark(doc, index) {
+        Some(sig) if !(opens_system && fits_margin(sig)) => {
+            // The air after the digits keeps an accidental hanging left of the
+            // first head off them.
+            3.0 + time_sig_digits(sig) * TIME_SIG_DIGIT_MM
+        }
+        _ => 0.0,
+    }
+}
+
+/// Centre of a time signature standing after its barline, measured from it.
+pub fn time_sig_offset(sig: (u8, u8)) -> f32 {
+    1.0 + time_sig_digits(sig) * TIME_SIG_DIGIT_MM * 0.5
+}
+
+/// Where a system prints its time signatures, as `(x from the system origin,
+/// signature)`: the piece's first metre, each change at its barline (in the
+/// margin when it opens the system and fits there), and a courtesy signature
+/// after the closing barline when the next system opens with a change. Never
+/// restated merely because a new system starts.
+pub fn time_sig_marks(doc: &Document, spacing: &Spacing) -> Vec<(f32, (u8, u8))> {
+    /// Centre of a signature standing in the staff head, left of the first barline.
+    const IN_MARGIN: f32 = -3.5;
+    let mut marks = Vec::new();
+    for (i, bar) in spacing.bars.iter().enumerate() {
+        if let Some(sig) = time_sig_mark(doc, bar.index) {
+            let x = if i == 0 && fits_margin(sig) {
+                IN_MARGIN
+            } else {
+                bar.x + time_sig_offset(sig)
+            };
+            marks.push((x, sig));
+        }
+    }
+    if let Some(next) = spacing.bars.last().map(|b| b.index + 1) {
+        if let Some(sig) = time_sig_mark(doc, next) {
+            marks.push((spacing.width + time_sig_offset(sig), sig));
+        }
+    }
+    marks
+}
+
 /// Horizontal placement of one bar inside a system. All values are millimetres
 /// relative to the system origin (its left edge).
 #[derive(Clone, Debug, PartialEq)]
@@ -146,10 +218,15 @@ pub fn system_spacing(
     target_width_mm: Option<f32>,
 ) -> Spacing {
     let h = doc.note_spacing;
+    let first = bars.start;
+    let lead = |i: usize| time_sig_lead(doc, i, i == first);
     let natural: f32 = bars
         .clone()
-        .filter_map(|i| doc.bars.get(i))
-        .map(|bar| natural_bar_width(bar, h))
+        .filter_map(|i| {
+            doc.bars
+                .get(i)
+                .map(|bar| natural_bar_width(bar, h) + lead(i))
+        })
         .sum();
 
     let scale = match target_width_mm {
@@ -163,10 +240,10 @@ pub fn system_spacing(
         let Some(bar) = doc.bars.get(index) else {
             continue;
         };
-        let width = natural_bar_width(bar, h) * scale;
+        let width = (natural_bar_width(bar, h) + lead(index)) * scale;
         // Half the barline gap in front; the other half falls out behind the last
         // event, which claims no slot of its own.
-        let mut cursor = x + BAR_GAP_MM * 0.5 * h * scale;
+        let mut cursor = x + (lead(index) + BAR_GAP_MM * 0.5 * h) * scale;
         let mut events = Vec::with_capacity(bar.events.len());
         for event in &bar.events {
             // A lead-in pushes this event's own column right, carving out the room

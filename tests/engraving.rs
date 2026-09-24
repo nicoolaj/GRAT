@@ -4,7 +4,7 @@
 use grat::engrave::{
     bar_duration_secs, bar_ticks, beam_groups, beam_run_span, beam_runs, is_complete,
     metronome_beats, natural_bar_width, set_event_dur, set_time_sig, set_time_sig_everywhere,
-    shift_event_dur, split_ticks, system_spacing, timeline, BeamGroup, BAR_GAP_MM,
+    shift_event_dur, split_ticks, system_spacing, time_sig_marks, timeline, BeamGroup, BAR_GAP_MM,
     SLIDE_IN_LEAD_MM,
 };
 use grat::model::*;
@@ -944,4 +944,37 @@ fn row_extent_grows_above_the_staff_for_a_high_run_but_not_below() {
         notation::BASELINE_OFFSET_MM,
         "a note only above the staff must not grow the room below it"
     );
+}
+
+#[test]
+fn time_sig_marks_follow_engraving_rules() {
+    // 4/4 4/4 | 3/4 3/4, broken after bar 1 and after bar 2.
+    let mut doc = two_bars_of_distinct_quarters();
+    doc.bars.push(Bar {
+        events: vec![ev(NoteValue::Quarter, vec![note(1)]); 3],
+        time_sig: Some((3, 4)),
+        ..Default::default()
+    });
+    doc.bars.push(Bar {
+        events: vec![ev(NoteValue::Quarter, vec![note(1)]); 3],
+        ..Default::default()
+    });
+    let sigs = |r: std::ops::Range<usize>| -> Vec<(bool, (u8, u8))> {
+        let sp = system_spacing(&doc, r, None);
+        time_sig_marks(&doc, &sp)
+            .into_iter()
+            .map(|(x, sig)| (x > sp.width - 0.01, sig))
+            .collect()
+    };
+    // Start of the piece, plus a courtesy 3/4 after the closing barline.
+    assert_eq!(sigs(0..2), vec![(false, (4, 4)), (true, (3, 4))]);
+    // The change itself, opening the next system.
+    assert_eq!(sigs(2..3), vec![(false, (3, 4))]);
+    // Not restated just because a new system starts.
+    assert_eq!(sigs(3..4), vec![]);
+    // A change inside a system prints at its barline.
+    let sp = system_spacing(&doc, 1..3, None);
+    let marks = time_sig_marks(&doc, &sp);
+    assert_eq!(marks.len(), 1);
+    assert!(marks[0].0 > sp.bars[1].x && marks[0].0 < sp.bars[1].events[0]);
 }

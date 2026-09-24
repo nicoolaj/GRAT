@@ -84,7 +84,14 @@ pub fn paginate(doc: &Document) -> Vec<Page> {
         .iter()
         .map(|r| engrave::system_spacing(doc, r.clone(), None).width)
         .collect();
-    let scale = justification_scale(&naturals, music_width);
+    // A courtesy time signature stands after a system's closing barline, so the
+    // line has to leave it room.
+    let courtesy: Vec<f32> = systems
+        .iter()
+        .map(|r| engrave::time_sig_lead(doc, r.end, false))
+        .collect();
+    let with_courtesy: Vec<f32> = naturals.iter().zip(&courtesy).map(|(n, c)| n + c).collect();
+    let scale = justification_scale(&with_courtesy, music_width);
 
     // Each system's own height, from exactly the bars line-breaking gave it — a
     // line with a high or low run reserves more room than an ordinary one right
@@ -205,10 +212,12 @@ fn break_lines(doc: &Document, music_width: f32) -> Vec<Range<usize>> {
     let mut systems = Vec::new();
     let mut i = 0;
     while i < doc.bars.len() {
-        let mut width = engrave::natural_bar_width(&doc.bars[i], h);
+        let mut width =
+            engrave::natural_bar_width(&doc.bars[i], h) + engrave::time_sig_lead(doc, i, true);
         let mut j = i + 1;
         while j < doc.bars.len() {
-            let w = engrave::natural_bar_width(&doc.bars[j], h);
+            let w =
+                engrave::natural_bar_width(&doc.bars[j], h) + engrave::time_sig_lead(doc, j, false);
             if width + w > music_width {
                 break;
             }

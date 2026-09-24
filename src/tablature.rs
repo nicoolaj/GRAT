@@ -9,14 +9,16 @@
 use crate::engrave::{beam_groups, beam_run_span, beam_runs, Spacing};
 use crate::model::{technique_color, Bar, Document, Event, Note, NoteValue, Strum, Technique};
 use crate::staff::{
-    arc, arrow_head, barline, dashed, ellipse, label_width, pt_for_cap, quad, wave, Barline, FAINT,
-    INK, PAPER,
+    arc, arrow_head, barline, dashed, ellipse, label_width, pt_for_cap, quad, time_signature, wave,
+    Barline, FAINT, INK, PAPER,
 };
 use crate::{Align, Prim, P};
 
 /// Distance between two string lines. Fixed: `tab_scale` grows the numbers and
 /// technique glyphs printed on the staff, never the string grid itself.
 pub const STRING_MM: f32 = 3.2;
+/// Digit height of the time signature on the tablature staff.
+const TIME_SIG_CAP_MM: f32 = 5.0;
 /// The six-line staff itself.
 pub const STAFF_MM: f32 = 5.0 * STRING_MM;
 /// Band above the staff: bends, vibrato, slurs, palm-mute spans, labels.
@@ -110,6 +112,9 @@ pub fn render(
         return;
     };
     let right = origin.x + spacing.width;
+    // The lines run on under a courtesy time signature past the closing barline.
+    let next = spacing.bars.last().map_or(0, |b| b.index + 1);
+    let lines_end = right + crate::engrave::time_sig_lead(doc, next, false);
     let top = origin.y + STAFF_MM;
 
     for s in 0..6u8 {
@@ -119,7 +124,7 @@ pub fn render(
                 x: origin.x - HEAD_MM,
                 y,
             },
-            b: P { x: right, y },
+            b: P { x: lines_end, y },
             w: LINE_W,
             color: INK,
         });
@@ -154,6 +159,12 @@ pub fn render(
         None => Barline::Double,
     };
     barline(closing, right, origin.y, top, &dot_ys, out);
+    // The metre: at the start of the piece, where it changes, and a courtesy
+    // signature closing a system whose successor opens with a change.
+    for (x, sig) in crate::engrave::time_sig_marks(doc, spacing) {
+        let (lower, upper) = (origin.y + STAFF_MM * 0.25, origin.y + STAFF_MM * 0.75);
+        time_signature(origin.x + x, lower, upper, TIME_SIG_CAP_MM, sig, true, out);
+    }
 
     for i in 0..spacing.bars.len() {
         render_bar(doc, spacing, i, origin, out, hits);

@@ -27,6 +27,45 @@ pub fn label_width(text: &str, pt: f32) -> f32 {
     text.chars().count() as f32 * 0.556 * pt * MM_PER_PT
 }
 
+/// A time signature centred on `x`: the numerator centred on `upper_mid`, the
+/// denominator on `lower_mid`, both `cap` tall. `knockout` clears the lines
+/// behind the digits first -- the tablature's string lines would otherwise run
+/// straight through them.
+pub fn time_signature(
+    x: f32,
+    lower_mid: f32,
+    upper_mid: f32,
+    cap: f32,
+    sig: (u8, u8),
+    knockout: bool,
+    out: &mut Vec<Prim>,
+) {
+    let pt = pt_for_cap(cap);
+    for (value, mid) in [(sig.0, upper_mid), (sig.1, lower_mid)] {
+        let s = value.to_string();
+        if knockout {
+            let half = label_width(&s, pt) * 0.5 + 0.3;
+            out.push(quad(
+                x - half,
+                mid - cap * 0.62,
+                x + half,
+                mid + cap * 0.62,
+                PAPER,
+            ));
+        }
+        out.push(Prim::Text {
+            pos: P {
+                x,
+                y: mid - cap * 0.5,
+            },
+            s,
+            pt,
+            color: INK,
+            align: Align::Center,
+        });
+    }
+}
+
 /// An axis-aligned filled bar.
 pub fn quad(x0: f32, y0: f32, x1: f32, y1: f32, color: Rgb) -> Prim {
     Prim::Poly {

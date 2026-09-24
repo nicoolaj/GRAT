@@ -12,8 +12,8 @@ use std::ops::Range;
 
 use crate::engrave::{beam_groups, beam_run_span, beam_runs, BeamGroup, Spacing};
 use crate::model::{technique_color, Document, Event, NoteValue, Technique};
-use crate::staff::{barline, ellipse, pt_for_cap, rest, Barline, INK, PAPER};
-use crate::{Align, Prim, Rgb, P};
+use crate::staff::{barline, ellipse, rest, time_signature, Barline, INK, PAPER};
+use crate::{Prim, Rgb, P};
 
 /// Distance between two staff lines, in millimetres.
 pub const SPACE_MM: f32 = 2.5;
@@ -120,6 +120,9 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
     };
     let sp = SPACE_MM;
     let right = origin.x + spacing.width;
+    // The lines run on under a courtesy time signature past the closing barline.
+    let next = spacing.bars.last().map_or(0, |b| b.index + 1);
+    let lines_end = right + crate::engrave::time_sig_lead(doc, next, false);
 
     for line in 0..5 {
         let y = origin.y + line as f32 * sp;
@@ -128,7 +131,7 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
                 x: origin.x - HEAD_MM,
                 y,
             },
-            b: P { x: right, y },
+            b: P { x: lines_end, y },
             w: LINE_W * sp,
             color: INK,
         });
@@ -158,20 +161,6 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
             (None, false) => Barline::Single,
         };
         barline(kind, x, origin.y, top, &dot_ys, out);
-
-        // Unlike the clef, a time signature is not restated on every system: it
-        // appears once at the start of the piece and again only where the metre
-        // actually changes.
-        let sig = doc.time_sig_at(bar.index);
-        let changed = bar.index == 0 || doc.time_sig_at(bar.index - 1) != sig;
-        if changed {
-            let at = if bar.index == first.index {
-                origin.x - 3.4
-            } else {
-                x + 1.6
-            };
-            time_signature(at, origin.y, sp, sig, out);
-        }
     }
     let last = spacing.bars.last().unwrap_or(first);
     let closing = match doc.bars.get(last.index).and_then(|b| b.repeat_end) {
@@ -180,6 +169,19 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
         None => Barline::Double,
     };
     barline(closing, right, origin.y, top, &dot_ys, out);
+    // The metre: at the start of the piece, where it changes, and a courtesy
+    // signature closing a system whose successor opens with a change.
+    for (x, sig) in crate::engrave::time_sig_marks(doc, spacing) {
+        time_signature(
+            origin.x + x,
+            origin.y + sp,
+            origin.y + 3.0 * sp,
+            1.9 * sp,
+            sig,
+            false,
+            out,
+        );
+    }
 
     for i in 0..spacing.bars.len() {
         render_bar(doc, spacing, i, origin, out);
@@ -797,19 +799,6 @@ fn ties(
                 color: INK,
             });
         }
-    }
-}
-
-fn time_signature(x: f32, y0: f32, sp: f32, sig: (u8, u8), out: &mut Vec<Prim>) {
-    let pt = pt_for_cap(1.9 * sp);
-    for (value, baseline) in [(sig.0, y0 + 2.0 * sp), (sig.1, y0 + 0.05 * sp)] {
-        out.push(Prim::Text {
-            pos: P { x, y: baseline },
-            s: value.to_string(),
-            pt,
-            color: INK,
-            align: Align::Center,
-        });
     }
 }
 
