@@ -489,9 +489,9 @@ pub fn cut(state: &mut EditorState, doc: &mut Document) -> bool {
     true
 }
 
-/// Paste the clipboard starting at the selected cell, overwriting one event per
-/// clipboard entry in document order. Stops at the end of the document rather than
-/// inserting, so no bar's total duration ever changes.
+/// Paste the clipboard starting at the selected cell, overwriting the content (not
+/// the duration) of one event per clipboard entry in document order. Stops at the
+/// end of the document rather than inserting, so no bar's total duration ever changes.
 ///
 /// ponytail: techniques that find their partner by position in the bar (slide,
 /// hammer-on/pull-off, trill -- via `Bar::next_on_string`) are copied as-is; at the
@@ -517,7 +517,12 @@ pub fn paste(state: &mut EditorState, doc: &mut Document) -> bool {
                 break;
             };
             if let Some(event) = doc.bars.get_mut(b).and_then(|bar| bar.events.get_mut(e)) {
-                *event = ev;
+                // The cell keeps its own duration: copying the clipboard's would
+                // change the bar's total and leave it over- or underfull.
+                *event = model::Event {
+                    dur: event.dur,
+                    ..ev
+                };
                 pasted = true;
             }
         }
@@ -1860,5 +1865,34 @@ mod tests {
             doc.bars[7].events[3].notes[0].fret, 1,
             "only the first clipboard event fit before the document ran out"
         );
+    }
+
+    #[test]
+    fn paste_keeps_the_target_duration() {
+        let mut doc = Document::new_empty(); // quarter rests
+        let mut state = EditorState {
+            clipboard: vec![model::Event {
+                dur: model::Dur {
+                    base: NoteValue::Sixteenth,
+                    dots: 1,
+                },
+                notes: vec![model::Note {
+                    string: 0,
+                    fret: 8,
+                    tech: Technique::Plain,
+                    tie_next: false,
+                }],
+                ..Default::default()
+            }],
+            selected: Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 0,
+            }),
+            ..Default::default()
+        };
+        assert!(paste(&mut state, &mut doc));
+        assert_eq!(doc.bars[0].events[0].notes[0].fret, 8);
+        assert!(engrave::is_complete(&doc.bars[0], doc.time_sig_at(0)));
     }
 }
