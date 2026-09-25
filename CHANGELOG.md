@@ -4,6 +4,15 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.9.0] — 2026-09-26
+
+### Ajouté
+- Chaque case tapée dans l'éditeur se fait entendre, avec le synthé du lecteur live. Tout
+  l'événement sonne, pour entendre l'accord en construction, capodastre compris ; une note
+  étouffée ne donne qu'un bruit sourd. Réglage « Entendre chaque note saisie » dans le menu
+  Affichage, activé par défaut et mémorisé. macOS et Windows (sous Linux, le son est absent comme
+  pour le reste du mode live).
+
 ## [4.8.0] — 2026-09-26
 
 ### Ajouté

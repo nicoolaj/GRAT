@@ -82,6 +82,8 @@ const TECH_LEGEND: &[(Technique, &str, &str, char)] = &[
 
 /// Which palette technique buttons are switched on, remembered across sessions.
 const TECH_SHOWN_STORAGE_KEY: &str = "tech_shown";
+/// Whether a typed fret is sounded, remembered across sessions.
+const HEAR_TYPED_STORAGE_KEY: &str = "hear_typed";
 
 /// The licence the About box names, so the line can be clicked through to it.
 const LICENSE_URL: &str = "https://creativecommons.org/licenses/by-nc-sa/4.0/";
@@ -341,6 +343,9 @@ struct TablaturesApp {
     editor: canvas::EditorState,
     /// The live player. Holds the window whenever `open`.
     live: live::LiveState,
+    /// Sounds each fret as it is typed, while `hear_typed` is on.
+    preview: live::Preview,
+    hear_typed: bool,
     /// The GRAT logo, decoded once: window icon, splash, and the About/Help pages.
     logo: egui::TextureHandle,
     /// The splash overlay shows until this instant, then is gone for the session;
@@ -363,7 +368,14 @@ impl TablaturesApp {
         today_decoration: Option<grat::decorations::Decoration>,
     ) -> Self {
         let mut editor = canvas::EditorState::default();
+        let mut hear_typed = true;
         if let Some(storage) = cc.storage {
+            if let Some(on) = storage
+                .get_string(HEAR_TYPED_STORAGE_KEY)
+                .and_then(|s| s.parse().ok())
+            {
+                hear_typed = on;
+            }
             if let Some(lang) = storage.get_string(i18n::LANG_STORAGE_KEY) {
                 i18n::set_lang(&lang);
             }
@@ -397,6 +409,8 @@ impl TablaturesApp {
             tuning_draft: None,
             editor,
             live: live::LiveState::default(),
+            preview: live::Preview::default(),
+            hear_typed,
             logo,
             splash_until: Some(std::time::Instant::now() + std::time::Duration::from_millis(2200)),
             splash_reading: random_expansion(),
@@ -934,6 +948,7 @@ impl TablaturesApp {
                             .enter(&self.doc, canvas::range_bars(&self.editor, &self.doc));
                         ui.close();
                     }
+                    ui.checkbox(&mut self.hear_typed, t("menu.hear_typed"));
                     ui.separator();
                     ui.menu_button(t("menu.language"), |ui| {
                         for lang in i18n::available_langs() {
@@ -1083,6 +1098,9 @@ impl TablaturesApp {
                 if canvas::show(ui, &mut self.editor, &mut self.doc, pages).is_some() {
                     self.dirty = true;
                     self.layout_dirty = true;
+                }
+                if let Some(sel) = self.editor.typed.take().filter(|_| self.hear_typed) {
+                    self.preview.play(&self.doc, sel.bar, sel.event);
                 }
             });
     }
@@ -1521,6 +1539,7 @@ impl eframe::App for TablaturesApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(i18n::LANG_STORAGE_KEY, i18n::current_lang());
         storage.set_string(TECH_SHOWN_STORAGE_KEY, self.editor.tech_shown.to_string());
+        storage.set_string(HEAR_TYPED_STORAGE_KEY, self.hear_typed.to_string());
     }
 }
 

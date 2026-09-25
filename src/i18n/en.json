@@ -28,6 +28,7 @@
   "menu.time_sig_all": "Time signature of the whole score",
   "menu.view": "View",
   "menu.live": "Live mode",
+  "menu.hear_typed": "Hear each note as it is typed",
   "menu.help": "Help",
   "dialog.unsaved_title": "Unsaved changes",
   "dialog.unsaved_body": "This document has unsaved changes. Discard them?",

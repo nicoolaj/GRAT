@@ -412,6 +412,58 @@ fn harmonic_offset(fret: u8) -> f32 {
     }
 }
 
+/// How long a note typed in the editor rings when it is sounded.
+const TYPED_SECS: f32 = 1.2;
+
+/// Sounds what is typed in the editor, with the player's own synth: the whole
+/// event, so a chord being built is heard whole. The audio device is opened at
+/// the first note, not at start-up.
+#[derive(Default)]
+pub struct Preview {
+    audio: Option<Audio>,
+    tried: bool,
+}
+
+impl Preview {
+    pub fn play(&mut self, doc: &Document, bar: usize, event: usize) {
+        if !self.tried {
+            self.audio = Audio::open();
+            self.tried = true;
+        }
+        if let Some(audio) = &self.audio {
+            for (f, secs, gain) in typed_notes(doc, bar, event) {
+                audio.note(&[(0.0, f)], secs, gain);
+            }
+        }
+    }
+}
+
+/// What sounding `doc`'s event `(bar, event)` plays, one (Hz, seconds, gain) per
+/// note: its pitch capo included, a harmonic at its node, a dead note a thud.
+fn typed_notes(doc: &Document, bar: usize, event: usize) -> Vec<(f32, f32, f32)> {
+    let Some(event) = doc.bars.get(bar).and_then(|b| b.events.get(event)) else {
+        return Vec::new();
+    };
+    event
+        .notes
+        .iter()
+        .map(|note| {
+            let node = match note.tech {
+                model::Technique::Harmonic | model::Technique::PinchHarmonic => {
+                    harmonic_offset(note.fret)
+                }
+                _ => 0.0,
+            };
+            let f = hz(doc.pitch(note) as f32 + node);
+            match note.tech {
+                model::Technique::Dead => (f, 0.05, NOTE_GAIN * 0.4),
+                model::Technique::Ghost => (f, TYPED_SECS, NOTE_GAIN * 0.5),
+                _ => (f, TYPED_SECS, NOTE_GAIN),
+            }
+        })
+        .collect()
+}
+
 /// Hz for a MIDI note number, A440 -- the tuning every pitch in this file
 /// assumes.
 fn hz(midi: f32) -> f32 {
@@ -1612,6 +1664,27 @@ mod tests {
         advance(&mut state, &show, 10.0 * show.program().duration);
         assert!(!state.playing);
         assert_eq!(state.t, show.program().duration);
+    }
+
+    #[test]
+    fn a_typed_chord_sounds_whole_capo_included() {
+        let mut doc = Document::new_empty();
+        doc.capo = 2;
+        let note = |string, fret, tech| model::Note {
+            string,
+            fret,
+            tech,
+            tie_next: false,
+        };
+        doc.bars[0].events[0].notes = vec![
+            note(0, 0, model::Technique::Plain),
+            note(4, 0, model::Technique::Dead),
+        ];
+        let played = typed_notes(&doc, 0, 0);
+        assert_eq!(played.len(), 2);
+        assert!((played[0].0 - hz(64.0 + 2.0)).abs() < 1e-2, "{played:?}");
+        assert!(played[1].1 < 0.1, "a dead note is a thud");
+        assert!(typed_notes(&doc, 99, 0).is_empty());
     }
 
     #[test]

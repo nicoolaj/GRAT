@@ -28,6 +28,7 @@
   "menu.time_sig_all": "Chiffrage de toute la partition",
   "menu.view": "Affichage",
   "menu.live": "Mode live",
+  "menu.hear_typed": "Entendre chaque note saisie",
   "menu.help": "Aide",
   "dialog.unsaved_title": "Modifications non enregistrées",
   "dialog.unsaved_body": "Ce document contient des modifications non enregistrées. Les abandonner ?",

@@ -90,6 +90,8 @@ pub struct EditorState {
     /// next time the selection highlight is drawn, so the view scrolls to follow
     /// the cursor without fighting the user's own mouse-wheel scrolling.
     scroll_to_sel: bool,
+    /// The cell a fret was just typed into, for the app to sound; it takes it.
+    pub typed: Option<Sel>,
     undo_stack: Vec<Document>,
 }
 
@@ -118,6 +120,7 @@ impl Default for EditorState {
             digit_buffer: String::new(),
             digit_deadline: None,
             scroll_to_sel: false,
+            typed: None,
             undo_stack: Vec::new(),
         }
     }
@@ -931,6 +934,7 @@ fn handle_digit(state: &mut EditorState, doc: &mut Document, digit: u32, now: f6
             }
         }
     });
+    state.typed = Some(sel);
     true
 }
 
