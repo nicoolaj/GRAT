@@ -110,6 +110,10 @@ never know about pages, egui or PDF.
   `Modifiers::matches_logically`; egui's own doc says so). Consume the most specific shortcut
   first: Cmd+Shift+S before Cmd+S, Cmd+Shift+Z before Cmd+Z, or the plain one takes it.
   `cmd_shift_z_redoes_rather_than_undoes` checks the order through the headless app.
+- **The persistence folder is named by `ViewportBuilder::app_id`, else by `run_native`'s name**
+  (eframe 0.36 `native/glow_integration.rs`). GRAT's `run_native` name is the window title, a new
+  random reading every launch, so `APP_ID` ("grat") is set explicitly -- without it settings
+  landed in a different `~/Library/Application Support/GRAT-…` folder each time.
 - eframe needs `features = ["persistence"]` or `cc.storage` is always `None` and `App::save` never
   runs.
 - Reach egui through `eframe::egui`; there is no separate `egui` dependency.
@@ -303,7 +307,10 @@ cargo test --bin grat ui_screenshots -- --ignored   # writes dist/ui-*.png
 `Shooter` (in `main.rs`'s tests) runs the real `TablaturesApp` headless, one frame at a time: it
 can click a label found by its exact text (`Shooter::text`), and paints a frame by rasterising
 egui's own meshes and font atlas into a PNG. Add a shot to `ui_screenshots` for any UI you change,
-and look at it -- it is also how `a_right_click_inside_the_selection_keeps_it` drives the mouse.
+and look at it -- it is also how `a_right_click_inside_the_selection_keeps_it` drives the mouse. A window, menu or modal
+egui opens is invisible on its first frame (a sizing pass): run a second frame before looking
+for it. Tests get no eframe storage, so the recovery file is off unless a test points
+`recovery_dir` at a scratch folder -- never at the user's.
 
 `cargo test --test decorations_visual` is the same idea for `decorations.rs`: it writes every
 calendar decoration's vector shapes to `dist/decorations-preview.svg` and bakes each one onto a

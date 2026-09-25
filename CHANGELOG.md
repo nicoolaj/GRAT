@@ -4,6 +4,25 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.11.0] — 2026-09-26
+
+### Ajouté
+- La boîte « modifications non enregistrées » propose Enregistrer : le morceau est enregistré
+  puis l'action demandée (Nouveau, Ouvrir, Quitter) continue ; si l'on annule la fenêtre
+  d'enregistrement, rien ne se passe.
+- Fichier > Ouvrir un fichier récent : les huit derniers fichiers ouverts ou enregistrés,
+  mémorisés d'une session à l'autre. Un fichier devenu introuvable quitte la liste.
+- Sauvegarde automatique : tant que des modifications ne sont pas enregistrées, une copie est
+  faite toutes les 15 secondes dans le dossier de l'application. Après un plantage, GRAT propose
+  au lancement suivant de récupérer ce travail, avec le fichier auquel il appartenait. La copie
+  disparaît dès que le travail est enregistré ou abandonné.
+- Le nom proposé pour enregistrer un `.gtab` est le titre du morceau, comme pour le PDF.
+
+### Corrigé
+- Les réglages mémorisés (langue, styles de notes, son de saisie, fichiers récents) sont enfin
+  relus au lancement suivant : ils étaient rangés dans un dossier nommé d'après le titre de la
+  fenêtre, tiré au hasard à chaque lancement. Les réglages déjà faits sont à refaire une fois.
+
 ## [4.10.0] — 2026-09-26
 
 ### Ajouté

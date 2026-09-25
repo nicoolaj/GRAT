@@ -88,6 +88,18 @@ const TECH_LEGEND: &[(Technique, &str, &str, char)] = &[
 const TECH_SHOWN_STORAGE_KEY: &str = "tech_shown";
 /// Whether a typed fret is sounded, remembered across sessions.
 const HEAR_TYPED_STORAGE_KEY: &str = "hear_typed";
+/// The files last opened or saved, newest first, one path per line.
+const RECENT_STORAGE_KEY: &str = "recent_files";
+const RECENT_MAX: usize = 8;
+
+/// The app's id for eframe: the persistence folder's name. Fixed, because the
+/// window title -- `run_native`'s name, which eframe falls back on -- is a new
+/// random reading of GRAT every launch, and settings saved under one were never
+/// found under the next.
+const APP_ID: &str = "grat";
+
+/// How often unsaved work is copied to the recovery file.
+const AUTOSAVE: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The licence the About box names, so the line can be clicked through to it.
 const LICENSE_URL: &str = "https://creativecommons.org/licenses/by-nc-sa/4.0/";
@@ -169,9 +181,9 @@ fn open_file(path: &std::path::Path) {
     }
 }
 
-/// The name the PDF save dialog proposes: the title, less the characters no
-/// file system takes (a title like "AC/DC" would otherwise name a folder).
-fn pdf_file_name(title: &str) -> String {
+/// The name a save dialog proposes: the title, less the characters no file
+/// system takes (a title like "AC/DC" would otherwise name a folder), then `ext`.
+fn file_name(title: &str, ext: &str) -> String {
     let stem: String = title
         .chars()
         .map(|c| {
@@ -184,7 +196,7 @@ fn pdf_file_name(title: &str) -> String {
         .collect();
     // Windows drops trailing dots and spaces, and a leading dot hides the file.
     let stem = stem.trim_matches(|c: char| c == '.' || c.is_whitespace());
-    format!("{}.pdf", if stem.is_empty() { "untitled" } else { stem })
+    format!("{}.{ext}", if stem.is_empty() { "untitled" } else { stem })
 }
 
 /// Write `bytes` to `path` without ever leaving it half-written: into a sibling
@@ -256,6 +268,7 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 720.0])
             .with_min_inner_size([640.0, 480.0])
+            .with_app_id(APP_ID)
             .with_icon(egui::IconData {
                 rgba: icon_rgba,
                 width: logo_w,
@@ -316,10 +329,12 @@ fn style_context(ctx: &egui::Context) {
     });
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum PendingAction {
     New,
     Open,
+    /// A recent file, picked from File > Open recent.
+    OpenPath(PathBuf),
     Quit,
 }
 
@@ -350,6 +365,15 @@ struct TablaturesApp {
     /// Sounds each fret as it is typed, while `hear_typed` is on.
     preview: live::Preview,
     hear_typed: bool,
+    /// Files last opened or saved, newest first.
+    recent: Vec<PathBuf>,
+    /// Where unsaved work is copied every [`AUTOSAVE`]: eframe's own folder for
+    /// the app. `None` without persistence, as in the tests.
+    recovery_dir: Option<PathBuf>,
+    last_autosave: std::time::Instant,
+    /// Work a crash left in the recovery file, offered back at start-up, with
+    /// the path it belonged to.
+    recovered: Option<(Document, Option<PathBuf>)>,
     /// The GRAT logo, decoded once: window icon, splash, and the About/Help pages.
     logo: egui::TextureHandle,
     /// The splash overlay shows until this instant, then is gone for the session;
@@ -373,7 +397,11 @@ impl TablaturesApp {
     ) -> Self {
         let mut editor = canvas::EditorState::default();
         let mut hear_typed = true;
+        let mut recent = Vec::new();
         if let Some(storage) = cc.storage {
+            if let Some(list) = storage.get_string(RECENT_STORAGE_KEY) {
+                recent = list.lines().map(PathBuf::from).collect();
+            }
             if let Some(on) = storage
                 .get_string(HEAR_TYPED_STORAGE_KEY)
                 .and_then(|s| s.parse().ok())
@@ -398,7 +426,7 @@ impl TablaturesApp {
         let logo = cc
             .egui_ctx
             .load_texture("logo", logo_image, egui::TextureOptions::LINEAR);
-        TablaturesApp {
+        let mut app = TablaturesApp {
             doc: Document::new_empty(),
             path: None,
             dirty: false,
@@ -415,11 +443,73 @@ impl TablaturesApp {
             live: live::LiveState::default(),
             preview: live::Preview::default(),
             hear_typed,
+            recent,
+            recovery_dir: cc.storage.and(eframe::storage_dir(APP_ID)),
+            last_autosave: std::time::Instant::now(),
+            recovered: None,
             logo,
             splash_until: Some(std::time::Instant::now() + std::time::Duration::from_millis(2200)),
             splash_reading: random_expansion(),
             today_decoration,
+        };
+        app.check_recovery();
+        app
+    }
+
+    /// The recovery file and its note of which file the work belonged to.
+    fn recovery_files(&self) -> Option<(PathBuf, PathBuf)> {
+        let dir = self.recovery_dir.as_ref()?;
+        Some((dir.join("recovery.gtab"), dir.join("recovery.path")))
+    }
+
+    /// Copy the unsaved work where a crash cannot take it.
+    ///
+    /// ponytail: one recovery file per user, not per window; two instances
+    /// editing at once overwrite each other's. Name it after the document's
+    /// path if anyone runs two.
+    fn autosave(&mut self) {
+        self.last_autosave = std::time::Instant::now();
+        let (Some((doc_file, path_file)), Ok(json)) = (self.recovery_files(), self.doc.to_json())
+        else {
+            return;
+        };
+        let _ = std::fs::create_dir_all(doc_file.parent().unwrap_or(&doc_file));
+        let path = self.path.as_ref().map(|p| p.to_string_lossy().into_owned());
+        let _ = write_atomic(&path_file, path.unwrap_or_default().as_bytes());
+        let _ = write_atomic(&doc_file, json.as_bytes());
+    }
+
+    /// The work is saved, or deliberately left: nothing to recover any more.
+    fn discard_recovery(&mut self) {
+        if let Some((doc_file, path_file)) = self.recovery_files() {
+            let _ = std::fs::remove_file(doc_file);
+            let _ = std::fs::remove_file(path_file);
         }
+    }
+
+    /// At start-up: whatever a crash left in the recovery file, to offer back.
+    fn check_recovery(&mut self) {
+        let Some((doc_file, path_file)) = self.recovery_files() else {
+            return;
+        };
+        let Some(doc) = std::fs::read_to_string(doc_file)
+            .ok()
+            .and_then(|s| Document::from_json(&s).ok())
+        else {
+            return;
+        };
+        let path = std::fs::read_to_string(path_file)
+            .ok()
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from);
+        self.recovered = Some((doc, path));
+    }
+
+    /// Put `path` at the head of File > Open recent.
+    fn remember(&mut self, path: &std::path::Path) {
+        self.recent.retain(|p| p != path);
+        self.recent.insert(0, path.to_path_buf());
+        self.recent.truncate(RECENT_MAX);
     }
 
     /// The launch splash: the logo and one random reading of the name, over an
@@ -491,6 +581,29 @@ impl TablaturesApp {
             self.pending = Some(PendingAction::Open);
         } else {
             self.do_open();
+        }
+    }
+
+    fn request_open_path(&mut self, path: PathBuf) {
+        if self.dirty {
+            self.pending = Some(PendingAction::OpenPath(path));
+        } else {
+            self.open_path(path);
+        }
+    }
+
+    /// Carry out what the unsaved-changes question held back, its answer given.
+    fn proceed(&mut self, ctx: &egui::Context, pending: PendingAction) {
+        match pending {
+            PendingAction::New => self.do_new(),
+            PendingAction::Open => self.do_open(),
+            PendingAction::OpenPath(path) => self.open_path(path),
+            PendingAction::Quit => {
+                // The close request `logic` held back comes round again; with
+                // nothing left unsaved it goes through.
+                self.dirty = false;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
         }
     }
 
@@ -620,6 +733,7 @@ impl TablaturesApp {
     fn do_new(&mut self) {
         canvas::replace_document(&mut self.editor, &mut self.doc, Document::new_empty());
         self.live.forget_loop();
+        self.discard_recovery();
         self.path = None;
         self.dirty = false;
         self.layout_dirty = true;
@@ -627,12 +741,17 @@ impl TablaturesApp {
     }
 
     fn do_open(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        if let Some(path) = rfd::FileDialog::new()
             .add_filter(t("dialog.gtab_filter"), &["gtab"])
             .pick_file()
-        else {
-            return;
-        };
+        {
+            self.open_path(path);
+        }
+    }
+
+    /// Load `path` in place of the document. A recent file that no longer
+    /// opens leaves the list.
+    fn open_path(&mut self, path: PathBuf) {
         match std::fs::read_to_string(&path)
             .ok()
             .map(|s| Document::from_json(&s))
@@ -640,13 +759,18 @@ impl TablaturesApp {
             Some(Ok(doc)) => {
                 canvas::replace_document(&mut self.editor, &mut self.doc, doc);
                 self.live.forget_loop();
+                self.discard_recovery();
+                self.remember(&path);
                 self.path = Some(path);
                 self.dirty = false;
                 self.layout_dirty = true;
                 self.status_msg = None;
             }
             Some(Err(LoadError::TooNew(_))) => self.status_msg = Some(t("error.load_too_new")),
-            Some(Err(LoadError::Parse)) | None => self.status_msg = Some(t("error.load")),
+            Some(Err(LoadError::Parse)) | None => {
+                self.recent.retain(|p| *p != path);
+                self.status_msg = Some(t("error.load"));
+            }
         }
     }
 
@@ -669,7 +793,7 @@ impl TablaturesApp {
     fn do_save_as(&mut self) {
         let Some(path) = rfd::FileDialog::new()
             .add_filter(t("dialog.gtab_filter"), &["gtab"])
-            .set_file_name("untitled.gtab")
+            .set_file_name(file_name(&self.doc.title, "gtab"))
             .save_file()
         else {
             return;
@@ -684,9 +808,11 @@ impl TablaturesApp {
         };
         match write_atomic(&path, json.as_bytes()) {
             Ok(()) => {
+                self.remember(&path);
                 self.path = Some(path);
                 self.dirty = false;
                 self.status_msg = None;
+                self.discard_recovery();
             }
             Err(_) => self.status_msg = Some(t("error.save")),
         }
@@ -699,7 +825,7 @@ impl TablaturesApp {
     fn do_export(&mut self) {
         let Some(path) = rfd::FileDialog::new()
             .add_filter(t("dialog.pdf_filter"), &["pdf"])
-            .set_file_name(pdf_file_name(&self.doc.title))
+            .set_file_name(file_name(&self.doc.title, "pdf"))
             .save_file()
         else {
             return;
@@ -746,6 +872,22 @@ impl TablaturesApp {
                         self.request_open();
                         ui.close();
                     }
+                    ui.menu_button(t("menu.recent"), |ui| {
+                        if self.recent.is_empty() {
+                            ui.weak(t("menu.recent_none"));
+                        }
+                        for path in self.recent.clone() {
+                            let name = path.file_name().unwrap_or_default().to_string_lossy();
+                            if ui
+                                .button(name)
+                                .on_hover_text(path.display().to_string())
+                                .clicked()
+                            {
+                                self.request_open_path(path);
+                                ui.close();
+                            }
+                        }
+                    });
                     ui.separator();
                     if ui
                         .add(egui::Button::new(t("menu.save")).shortcut_text(sc_save))
@@ -1201,11 +1343,22 @@ impl eframe::App for TablaturesApp {
     /// taskbar would otherwise slip through. The window is brought back so the
     /// question can be seen.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.dirty && ctx.input(|i| i.viewport().close_requested()) {
+        let closing = ctx.input(|i| i.viewport().close_requested());
+        if closing && self.dirty {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             self.pending = Some(PendingAction::Quit);
+        } else if closing {
+            self.discard_recovery();
+        }
+        // Unsaved work goes to the recovery file every AUTOSAVE, and a frame is
+        // booked for then even if nothing else asks for one.
+        if self.dirty {
+            if self.last_autosave.elapsed() >= AUTOSAVE {
+                self.autosave();
+            }
+            ctx.request_repaint_after(AUTOSAVE);
         }
     }
 
@@ -1319,24 +1472,24 @@ impl eframe::App for TablaturesApp {
         self.egui_menu_bar(ui);
 
         // Unsaved-changes confirmation, shown for New/Open/Quit while `dirty`.
-        if let Some(pending) = self.pending {
+        if let Some(pending) = self.pending.clone() {
             let resp = egui::Modal::new(egui::Id::new("unsaved_modal")).show(ui.ctx(), |ui| {
                 ui.set_min_width(320.0);
                 ui.heading(t("dialog.unsaved_title"));
                 ui.label(t("dialog.unsaved_body"));
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button(t("dialog.discard")).clicked() {
-                        match pending {
-                            PendingAction::New => self.do_new(),
-                            PendingAction::Open => self.do_open(),
-                            PendingAction::Quit => {
-                                // The close request `logic` held back comes round
-                                // again; with nothing left unsaved it goes through.
-                                self.dirty = false;
-                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                            }
+                    // Saved -- unless the save dialog was cancelled -- then on.
+                    if ui.button(t("dialog.save")).clicked() {
+                        self.do_save();
+                        if !self.dirty {
+                            self.proceed(ui.ctx(), pending.clone());
                         }
+                        self.pending = None;
+                    }
+                    if ui.button(t("dialog.discard")).clicked() {
+                        self.discard_recovery();
+                        self.proceed(ui.ctx(), pending.clone());
                         self.pending = None;
                     }
                     if ui.button(t("dialog.cancel")).clicked() {
@@ -1346,6 +1499,35 @@ impl eframe::App for TablaturesApp {
             });
             if resp.should_close() {
                 self.pending = None;
+            }
+        }
+
+        // Work a crash left behind, offered back once, at start-up.
+        if let Some((doc, path)) = self.recovered.clone() {
+            let resp = egui::Modal::new(egui::Id::new("recover_modal")).show(ui.ctx(), |ui| {
+                ui.set_min_width(340.0);
+                ui.heading(t("dialog.recover_title"));
+                ui.label(t("dialog.recover_body"));
+                if let Some(path) = &path {
+                    ui.weak(path.display().to_string());
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(t("dialog.recover")).clicked() {
+                        canvas::replace_document(&mut self.editor, &mut self.doc, doc.clone());
+                        self.path = path.clone();
+                        self.dirty = true;
+                        self.layout_dirty = true;
+                        self.recovered = None;
+                    }
+                    if ui.button(t("dialog.discard")).clicked() {
+                        self.discard_recovery();
+                        self.recovered = None;
+                    }
+                });
+            });
+            if resp.should_close() {
+                self.recovered = None;
             }
         }
 
@@ -1574,6 +1756,12 @@ impl eframe::App for TablaturesApp {
         storage.set_string(i18n::LANG_STORAGE_KEY, i18n::current_lang());
         storage.set_string(TECH_SHOWN_STORAGE_KEY, self.editor.tech_shown.to_string());
         storage.set_string(HEAR_TYPED_STORAGE_KEY, self.hear_typed.to_string());
+        let recent: Vec<String> = self
+            .recent
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        storage.set_string(RECENT_STORAGE_KEY, recent.join("\n"));
     }
 }
 
@@ -1865,6 +2053,28 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }]);
+        shot.app.dirty = true;
+        shot.app.pending = Some(PendingAction::Quit);
+        shot.frame(Vec::new());
+        shot.frame(Vec::new());
+        shot.shoot("unsaved-dialog");
+        shot.app.pending = None;
+        shot.app.recovered = Some((
+            shot.app.doc.clone(),
+            Some(PathBuf::from("/Users/me/song.gtab")),
+        ));
+        shot.frame(Vec::new());
+        shot.frame(Vec::new());
+        shot.shoot("recover-dialog");
+        shot.app.recovered = None;
+        shot.frame(Vec::new());
+        shot.frame(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
         shot.app.editor.selected = Some(canvas::Sel {
             bar: 0,
             event: 3,
@@ -2005,6 +2215,81 @@ mod tests {
         assert_eq!(shot.app.doc, edited, "and redone, not undone twice");
     }
 
+    /// A fresh scratch folder for one test, gone with the next run.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("grat-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn saving_from_the_unsaved_dialog_saves_then_goes_on() {
+        let dir = scratch("save-then-new");
+        let mut doc = Document::new_empty();
+        doc.title = "Kept".into();
+        let mut shot = Shooter::new(doc);
+        shot.app.path = Some(dir.join("kept.gtab"));
+        shot.app.dirty = true;
+        shot.app.pending = Some(PendingAction::New);
+        // A modal's first frame only sizes it; it shows on the second.
+        shot.frame(Vec::new());
+        shot.frame(Vec::new());
+        let save = shot.text(&t("dialog.save"));
+        shot.click(save, egui::PointerButton::Primary, egui::Modifiers::NONE);
+        let saved = std::fs::read_to_string(dir.join("kept.gtab")).unwrap();
+        assert_eq!(Document::from_json(&saved).unwrap().title, "Kept");
+        assert!(shot.app.doc.title.is_empty(), "then New went ahead");
+        assert!(!shot.app.dirty && shot.app.pending.is_none());
+        assert_eq!(shot.app.recent.first(), Some(&dir.join("kept.gtab")));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unsaved_work_is_offered_back_after_a_crash() {
+        let dir = scratch("recovery");
+        let mut doc = Document::new_empty();
+        doc.title = "Not yet saved".into();
+        let mut before = Shooter::new(doc.clone());
+        before.app.recovery_dir = Some(dir.clone());
+        before.app.path = Some(dir.join("song.gtab"));
+        before.app.dirty = true;
+        before.app.autosave();
+        drop(before); // the crash: nothing tidied up
+
+        let mut after = Shooter::new(Document::new_empty());
+        after.app.recovery_dir = Some(dir.clone());
+        after.app.check_recovery();
+        after.frame(Vec::new());
+        after.frame(Vec::new());
+        let recover = after.text(&t("dialog.recover"));
+        after.click(recover, egui::PointerButton::Primary, egui::Modifiers::NONE);
+        assert_eq!(after.app.doc.title, "Not yet saved");
+        assert_eq!(after.app.path, Some(dir.join("song.gtab")));
+        assert!(after.app.dirty, "recovered, not saved");
+
+        after.app.save_to(dir.join("song.gtab"));
+        assert!(
+            !dir.join("recovery.gtab").exists(),
+            "saved: nothing left to recover"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn recent_files_keep_the_newest_first_without_repeats() {
+        let mut shot = Shooter::new(Document::new_empty());
+        for name in ["a", "b", "a"] {
+            shot.app.remember(std::path::Path::new(name));
+        }
+        assert_eq!(shot.app.recent, [PathBuf::from("a"), PathBuf::from("b")]);
+        for k in 0..20 {
+            shot.app.remember(std::path::Path::new(&k.to_string()));
+        }
+        assert_eq!(shot.app.recent.len(), RECENT_MAX);
+        assert_eq!(shot.app.recent[0], PathBuf::from("19"));
+    }
+
     #[test]
     fn every_technique_key_is_free_to_type() {
         let keys: Vec<char> = TECH_LEGEND.iter().map(|row| row.3).collect();
@@ -2026,10 +2311,10 @@ mod tests {
 
     #[test]
     fn the_pdf_name_is_the_title_as_a_file_system_takes_it() {
-        assert_eq!(pdf_file_name(""), "untitled.pdf");
-        assert_eq!(pdf_file_name("  ...  "), "untitled.pdf");
-        assert_eq!(pdf_file_name("AC/DC: Live?"), "AC-DC- Live-.pdf");
-        assert_eq!(pdf_file_name(" .Été. "), "Été.pdf");
+        assert_eq!(file_name("", "pdf"), "untitled.pdf");
+        assert_eq!(file_name("  ...  ", "gtab"), "untitled.gtab");
+        assert_eq!(file_name("AC/DC: Live?", "pdf"), "AC-DC- Live-.pdf");
+        assert_eq!(file_name(" .Été. ", "gtab"), "Été.gtab");
     }
 
     #[test]
