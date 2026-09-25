@@ -179,6 +179,14 @@ pub fn arc(a: P, b: P, bulge: f32, w: f32, color: Rgb) -> Prim {
     }
 }
 
+/// A tie, drawn alike on the tablature and the staff: an [`arc`] whose `bulge` is
+/// only a ceiling, shallower on a short span so a tie between close columns is a
+/// flat smile rather than a hoop.
+pub fn tie(a: P, b: P, bulge: f32, w: f32, color: Rgb) -> Prim {
+    let span = (b.x - a.x).max(0.1);
+    arc(a, b, bulge.clamp(-span * 0.36, span * 0.36), w, color)
+}
+
 /// What kind of barline to draw. Repeats are the reason this is an enum: a bar can
 /// both close one repeated passage and open the next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

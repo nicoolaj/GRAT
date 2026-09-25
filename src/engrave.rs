@@ -9,14 +9,18 @@
 
 use crate::model::{Bar, Document, Dur, Event, NoteValue, Technique};
 
-/// Air around a barline: half before the bar's first event, half after the end of
-/// its last one's duration slot.
+/// Air between a barline and the bar's first event.
 ///
-/// One constant split in two, rather than a lead-in and a trail that can drift
-/// apart. It is air only — the last event's own duration is reserved on top of it
-/// (see [`natural_bar_width`]), so this is the barline breathing room, not the
-/// space that shows how long the final note lasts.
-pub const BAR_GAP_MM: f32 = 8.75;
+/// Nothing is added behind the last event: its own duration slot is already the
+/// air before the closing barline (see [`natural_bar_width`]), the way the next
+/// note would stand there if there were one. Adding barline air on top of that
+/// slot left twice as much paper on the right of a bar as on its left. The slot
+/// is floored at this value, so a bar ending on a sixteenth still breathes.
+pub const BAR_LEAD_MM: f32 = 4.375;
+/// Extra room after the event that closes a rhythmic group, as a fraction of its
+/// own slot: one unit between the notes of a group, 1.3 between two groups, so
+/// the beats read apart on every row. See [`group_span`] for where groups end.
+pub const GROUP_GAP: f32 = 0.3;
 /// A system is never squeezed below this fraction of its natural width; past that
 /// point the music overflows rather than becoming unreadable.
 pub const MIN_SQUEEZE: f32 = 0.6;
@@ -68,8 +72,65 @@ pub fn event_lead_in(event: &Event, h: f32) -> f32 {
     }
 }
 
+/// Ticks between the group breaks spacing leaves [`GROUP_GAP`] at: one beat once
+/// the bar moves in quavers or faster, two in a metre of four-plus beats that
+/// moves no faster than crotchets -- `q q | q q` rather than four evenly spread
+/// quarters. Where a two-beat span has no midpoint to show (2/4, 3/4, compound
+/// metres) it falls back to the beat, which spaces every crotchet alike and so
+/// changes nothing once the line is justified.
+///
+/// Beaming keeps its own window ([`beam_span`]): in 4/4 of running quavers the
+/// gap falls at each beat, inside the beam of four.
+fn group_span(time_sig: (u8, u8), bar: &Bar) -> u32 {
+    let beat = beat_ticks(time_sig).max(1);
+    let shortest = fastest_note(bar).unwrap_or(beat);
+    if shortest >= NoteValue::Quarter.ticks() && has_wide_midpoint(time_sig) {
+        beat * 2
+    } else {
+        beat
+    }
+}
+
+/// Paper each event of `bar` moves the cursor on by, its lead-in apart: the
+/// duration slot, at least a quaver's when the event is tied onward (or its tie
+/// is squashed between two heads), widened by [`GROUP_GAP`] where the next event
+/// opens a group. The last event's slot is the air before the barline, floored
+/// at [`BAR_LEAD_MM`].
+///
+/// The one place slots are decided: [`natural_bar_width`] sums them and
+/// [`system_spacing`] walks them, so a bar's width and its columns cannot drift.
+fn slots(bar: &Bar, time_sig: (u8, u8), h: f32) -> Vec<f32> {
+    let span = group_span(time_sig, bar);
+    let onsets = onsets(bar);
+    let tie_room = natural_event_width(
+        &Dur {
+            base: NoteValue::Eighth,
+            dots: 0,
+        },
+        h,
+    );
+    let last = bar.events.len().saturating_sub(1);
+    bar.events
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let mut w = natural_event_width(&e.dur, h);
+            if e.notes.iter().any(|n| n.tie_next) {
+                w = w.max(tie_room);
+            }
+            if i == last {
+                w.max(BAR_LEAD_MM * h)
+            } else if onsets[i + 1].is_multiple_of(span) {
+                w * (1.0 + GROUP_GAP)
+            } else {
+                w
+            }
+        })
+        .collect()
+}
+
 /// Width a bar wants when nothing constrains it, at note spacing `h`. Every
-/// millimetre scales with `h` — [`BAR_GAP_MM`] too — so
+/// millimetre scales with `h` — [`BAR_LEAD_MM`] too — so
 /// `natural_bar_width(.., h) == h * natural_bar_width(.., 1.0)` at any density.
 ///
 /// **Every** event claims a duration slot, the last one included. A slot is how
@@ -78,7 +139,7 @@ pub fn event_lead_in(event: &Event, h: f32) -> f32 {
 /// barline, or that whole beat reads as an instant. Leaving the last event out --
 /// which is what put the music optically in the middle of the bar -- made the
 /// final beat of every bar roughly a third of its rightful width.
-pub fn natural_bar_width(bar: &Bar, h: f32) -> f32 {
+pub fn natural_bar_width(bar: &Bar, time_sig: (u8, u8), h: f32) -> f32 {
     let events: f32 = if bar.events.is_empty() {
         // An empty bar still needs to be visible and clickable.
         natural_event_width(
@@ -89,13 +150,10 @@ pub fn natural_bar_width(bar: &Bar, h: f32) -> f32 {
             h,
         )
     } else {
-        bar.events
-            .iter()
-            .map(|e| natural_event_width(&e.dur, h))
-            .sum()
+        slots(bar, time_sig, h).iter().sum()
     };
     let lead_in: f32 = bar.events.iter().map(|e| event_lead_in(e, h)).sum();
-    BAR_GAP_MM * h + events + lead_in
+    BAR_LEAD_MM * h + events + lead_in
 }
 
 /// Width of one time-signature digit, the widest the rows print (the tablature's).
@@ -225,7 +283,7 @@ pub fn system_spacing(
         .filter_map(|i| {
             doc.bars
                 .get(i)
-                .map(|bar| natural_bar_width(bar, h) + lead(i))
+                .map(|bar| natural_bar_width(bar, doc.time_sig_at(i), h) + lead(i))
         })
         .sum();
 
@@ -240,20 +298,18 @@ pub fn system_spacing(
         let Some(bar) = doc.bars.get(index) else {
             continue;
         };
-        let width = (natural_bar_width(bar, h) + lead(index)) * scale;
-        // Half the barline gap in front; the other half falls out behind the last
-        // event, which claims no slot of its own.
-        let mut cursor = x + (lead(index) + BAR_GAP_MM * 0.5 * h) * scale;
+        let sig = doc.time_sig_at(index);
+        let width = (natural_bar_width(bar, sig, h) + lead(index)) * scale;
+        // The barline air in front; behind the last event, its own slot is the air.
+        let mut cursor = x + (lead(index) + BAR_LEAD_MM * h) * scale;
         let mut events = Vec::with_capacity(bar.events.len());
-        for event in &bar.events {
+        for (event, slot) in bar.events.iter().zip(slots(bar, sig, h)) {
             // A lead-in pushes this event's own column right, carving out the room
             // its glyph hangs into on the left. `natural_bar_width` counts the same
-            // term, so the air behind the bar's last note is unchanged -- except
-            // when the *first* event itself claims a lead-in, which deliberately
-            // unbalances the bar: it eats into the front gap instead of the back.
+            // term, so the air behind the bar's last note is unchanged.
             cursor += event_lead_in(event, h) * scale;
             events.push(cursor);
-            cursor += natural_event_width(&event.dur, h) * scale;
+            cursor += slot * scale;
         }
         // A whole-bar rest is centred between its barlines: the one place notation
         // puts a symbol at the middle of the bar rather than at the instant it

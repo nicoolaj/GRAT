@@ -4,6 +4,19 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.1.0] — 2026-09-25
+
+### Modifié
+- **Espacement par groupes** : l'écart entre deux groupes rythmiques vaut 1,3 fois l'écart entre
+  deux notes d'un même groupe, sur toutes les lignes (tablature, rythme, portée). La séparation
+  tombe à chaque temps dès qu'une mesure contient des croches ou plus rapide, tous les 2 temps
+  (au milieu de la mesure en 4/4) quand elle ne va pas plus vite que la noire.
+- **Liaisons uniformes** : une note liée reçoit au moins la place d'une croche, et la tablature
+  comme la portée dessinent la même courbe, plus plate quand elle est courte. Une double-croche
+  liée n'a plus de liaison écrasée, ni de « U » profond dans la tab.
+- **Fin de mesure resserrée** : l'espace avant la barre de mesure est celui de la durée de la
+  dernière note, sans marge en plus (et jamais moins que l'espace en début de mesure).
+
 ## [4.0.0] — 2026-09-24
 
 ### Ajouté
@@ -343,5 +356,6 @@ Première version.
 - Édition à la souris et palette d'outils.
 - Export PDF (menu, Cmd+E, `--export`), pages À propos et Aide, icône macOS, exemples.
 
+[4.1.0]: https://github.com/nicoolaj/GRAT/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/nicoolaj/GRAT/compare/v3.6.1...v4.0.0
 [3.6.1]: https://github.com/nicoolaj/GRAT/compare/v3.6.0...v3.6.1

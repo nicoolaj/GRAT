@@ -4,8 +4,8 @@
 use grat::engrave::{
     bar_duration_secs, bar_ticks, beam_groups, beam_run_span, beam_runs, is_complete,
     metronome_beats, natural_bar_width, set_event_dur, set_time_sig, set_time_sig_everywhere,
-    shift_event_dur, split_ticks, system_spacing, time_sig_marks, timeline, BeamGroup, BAR_GAP_MM,
-    SLIDE_IN_LEAD_MM,
+    shift_event_dur, split_ticks, system_spacing, time_sig_marks, timeline, BeamGroup, BAR_LEAD_MM,
+    GROUP_GAP, SLIDE_IN_LEAD_MM,
 };
 use grat::model::*;
 use grat::notation;
@@ -363,24 +363,22 @@ fn the_last_event_of_a_bar_still_gets_its_duration_in_paper() {
     for target in [None, Some(200.0)] {
         let sp = system_spacing(&doc, 0..1, target);
         let bar = &sp.bars[0];
-        let scale = bar.width / natural_bar_width(&doc.bars[0], 1.0);
+        let scale = bar.width / natural_bar_width(&doc.bars[0], (4, 4), 1.0);
         let lead = bar.events[0] - bar.x;
         let trail = bar.x + bar.width - bar.events[n - 1];
-        // Air is the same at both ends...
+        // Barline air in front...
         assert!(
-            (lead - BAR_GAP_MM / 2.0 * scale).abs() < 0.01,
+            (lead - BAR_LEAD_MM * scale).abs() < 0.01,
             "target {target:?}: lead {lead}"
         );
-        // ...but the trailing quarter also owns its own slot on top of that air.
-        let want = (BAR_GAP_MM / 2.0
-            + grat::engrave::natural_event_width(
-                &Dur {
-                    base: NoteValue::Quarter,
-                    dots: 0,
-                },
-                1.0,
-            ))
-            * scale;
+        // ...and behind the trailing quarter, its own slot is the air: nothing on top.
+        let want = grat::engrave::natural_event_width(
+            &Dur {
+                base: NoteValue::Quarter,
+                dots: 0,
+            },
+            1.0,
+        ) * scale;
         assert!(
             (trail - want).abs() < 0.01,
             "target {target:?}: trail {trail}, want {want}"
@@ -427,7 +425,10 @@ fn an_approach_slide_claims_room_in_front_of_itself() {
     slid.events[1].notes[0].tech = Technique::SlideIn { from_fret: 3 };
 
     assert!(
-        (natural_bar_width(&slid, 1.0) - natural_bar_width(&plain, 1.0) - SLIDE_IN_LEAD_MM).abs()
+        (natural_bar_width(&slid, (4, 4), 1.0)
+            - natural_bar_width(&plain, (4, 4), 1.0)
+            - SLIDE_IN_LEAD_MM)
+            .abs()
             < 0.001,
         "the bar's natural width must grow by exactly SLIDE_IN_LEAD_MM"
     );
@@ -441,18 +442,96 @@ fn an_approach_slide_claims_room_in_front_of_itself() {
 
     let bar = &slid_sp.bars[0];
     let trail = bar.x + bar.width - bar.events[1];
-    let want = BAR_GAP_MM / 2.0
-        + grat::engrave::natural_event_width(
-            &Dur {
-                base: NoteValue::Quarter,
-                dots: 0,
-            },
-            1.0,
-        );
+    let want = grat::engrave::natural_event_width(
+        &Dur {
+            base: NoteValue::Quarter,
+            dots: 0,
+        },
+        1.0,
+    );
     assert!(
         (trail - want).abs() < 0.001,
-        "the last quarter's slot plus BAR_GAP_MM / 2 of air, unchanged by the lead-in: got {trail}, want {want}"
+        "the last quarter's slot, unchanged by the lead-in: got {trail}, want {want}"
     );
+}
+
+/// Column-to-column distances of bar 0, laid out at its natural width.
+fn steps(doc: &Document) -> Vec<f32> {
+    let sp = system_spacing(doc, 0..1, None);
+    sp.bars[0].events.windows(2).map(|w| w[1] - w[0]).collect()
+}
+
+#[test]
+fn groups_breathe_apart_by_the_beat_or_the_half_bar() {
+    let close = |a: f32, b: f32| (a - b).abs() < 0.001;
+    // Quavers: one unit inside a beat, 1.3 across each beat.
+    let eighths = doc_with(Bar {
+        events: (0..8)
+            .map(|_| ev(NoteValue::Eighth, vec![note(5)]))
+            .collect(),
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    });
+    let s = steps(&eighths);
+    for (i, &step) in s.iter().enumerate() {
+        let want = if i % 2 == 1 {
+            s[0] * (1.0 + GROUP_GAP)
+        } else {
+            s[0]
+        };
+        assert!(close(step, want), "eighths step {i}: {step}, want {want}");
+    }
+    // Crotchets at most: the gap falls every two beats, at mid-bar only.
+    let quarters = doc_with(four_quarters());
+    let s = steps(&quarters);
+    assert!(close(s[0], s[2]), "{s:?}");
+    assert!(close(s[1], s[0] * (1.0 + GROUP_GAP)), "{s:?}");
+}
+
+#[test]
+fn every_tie_gets_the_same_room() {
+    // The bar that showed the problem: `8th. 8th. q 8th 8th 8th` in 4/4 prints as
+    // `8th. 16th~ | 8th 8th~ | 8th 8th | 8th 8th`. The tied sixteenth used to get
+    // a sixteenth's width and a squashed tie beside the quaver's long one.
+    let doc = grat::engrave::for_export(&doc_with(Bar {
+        events: vec![
+            dotted(NoteValue::Eighth, vec![note(5)]),
+            dotted(NoteValue::Eighth, vec![note(3)]),
+            ev(NoteValue::Quarter, vec![note(5)]),
+            ev(NoteValue::Eighth, vec![note(3)]),
+            ev(NoteValue::Eighth, vec![note(6)]),
+            ev(NoteValue::Eighth, vec![note(5)]),
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    }));
+    let tied: Vec<usize> = doc.bars[0]
+        .events
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.notes.iter().any(|n| n.tie_next))
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(tied, vec![1, 3], "the sixteenth and the quaver are tied on");
+    let s = steps(&doc);
+    assert!((s[1] - s[3]).abs() < 0.001, "tie rooms differ: {s:?}");
+}
+
+#[test]
+fn the_barline_gets_the_last_slot_and_no_more() {
+    let trail = |last: NoteValue| {
+        let mut bar = four_quarters();
+        bar.events.pop();
+        bar.events.push(ev(last, vec![note(5)]));
+        let sp = system_spacing(&doc_with(bar), 0..1, None);
+        let b = &sp.bars[0];
+        b.x + b.width - b.events.last().unwrap()
+    };
+    let slot = |base| grat::engrave::natural_event_width(&Dur { base, dots: 0 }, 1.0);
+    assert!((trail(NoteValue::Eighth) - slot(NoteValue::Eighth)).abs() < 0.001);
+    // A sixteenth's slot is narrower than the barline air in front of the bar:
+    // the back never gets less than the front.
+    assert!((trail(NoteValue::Sixteenth) - BAR_LEAD_MM).abs() < 0.001);
 }
 
 #[test]

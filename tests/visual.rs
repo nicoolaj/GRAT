@@ -249,6 +249,50 @@ fn proof_sheet() {
     eprintln!("wrote dist/notation-preview.svg");
 }
 
+/// The bar that showed uneven ties and groups run together: `8th. 8th. q 8th 8th 8th`
+/// in 4/4, which print splits into two ties across beats 2 and 3. Once as a
+/// tablature-only block carrying its own rhythm, once as tablature over a staff.
+#[test]
+fn ties_proof_sheet() {
+    let e = |base, dots, string, fret| Event {
+        dur: Dur { base, dots },
+        notes: vec![Note {
+            string,
+            fret,
+            tech: Technique::Plain,
+            tie_next: false,
+        }],
+        ..Default::default()
+    };
+    let mut doc = Document::new_empty();
+    doc.bars = vec![Bar {
+        events: vec![
+            e(NoteValue::Eighth, 1, 3, 5),
+            e(NoteValue::Eighth, 1, 3, 3),
+            e(NoteValue::Quarter, 0, 4, 5),
+            e(NoteValue::Eighth, 0, 4, 3),
+            e(NoteValue::Eighth, 0, 5, 6),
+            e(NoteValue::Eighth, 0, 4, 5),
+        ],
+        time_sig: Some((4, 4)),
+        ..Default::default()
+    }];
+    let doc = engrave::for_export(&doc);
+
+    let left = 15.0 + tablature::HEAD_MM;
+    let sp = engrave::system_spacing(&doc, 0..1, Some(120.0));
+    let mut prims = Vec::new();
+    let mut hits = Vec::new();
+    tablature::render(&doc, &sp, P { x: left, y: 70.0 }, &mut prims, &mut hits);
+    tablature::render_rhythm(&doc, &sp, P { x: left, y: 70.0 }, &mut prims);
+    tablature::render(&doc, &sp, P { x: left, y: 36.0 }, &mut prims, &mut hits);
+    notation::render(&doc, &sp, P { x: left, y: 12.0 }, &mut prims);
+
+    std::fs::create_dir_all("dist").ok();
+    std::fs::write("dist/ties-preview.svg", svg(&prims, 160.0, 95.0)).unwrap();
+    eprintln!("wrote dist/ties-preview.svg");
+}
+
 /// A realistic piece, so the page furniture can be looked at: title block, running
 /// header, footer, several blocks per page, and a repeat spanning a page break.
 fn song() -> Document {

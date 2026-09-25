@@ -212,12 +212,12 @@ fn break_lines(doc: &Document, music_width: f32) -> Vec<Range<usize>> {
     let mut systems = Vec::new();
     let mut i = 0;
     while i < doc.bars.len() {
-        let mut width =
-            engrave::natural_bar_width(&doc.bars[i], h) + engrave::time_sig_lead(doc, i, true);
+        let mut width = engrave::natural_bar_width(&doc.bars[i], doc.time_sig_at(i), h)
+            + engrave::time_sig_lead(doc, i, true);
         let mut j = i + 1;
         while j < doc.bars.len() {
-            let w =
-                engrave::natural_bar_width(&doc.bars[j], h) + engrave::time_sig_lead(doc, j, false);
+            let w = engrave::natural_bar_width(&doc.bars[j], doc.time_sig_at(j), h)
+                + engrave::time_sig_lead(doc, j, false);
             if width + w > music_width {
                 break;
             }

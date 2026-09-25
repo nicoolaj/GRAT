@@ -810,24 +810,7 @@ fn ties(
                 x: target.x - HEAD_RX * sp * 1.15,
                 y: target.y + sign * 0.30 * sp,
             };
-            let span = (b.x - a.x).max(0.1);
-            // Shallow, and shallower still on a short tie: a fixed depth turns the
-            // gap between two adjacent heads into a croquet hoop.
-            let depth = sign * (0.62 * sp).min(span * 0.36);
-            out.push(Prim::Curve {
-                a,
-                c1: P {
-                    x: a.x + span * 0.22,
-                    y: a.y + depth,
-                },
-                c2: P {
-                    x: b.x - span * 0.22,
-                    y: b.y + depth,
-                },
-                b,
-                w: 0.11 * sp,
-                color: INK,
-            });
+            out.push(crate::staff::tie(a, b, sign * 0.62 * sp, 0.11 * sp, INK));
         }
     }
 }

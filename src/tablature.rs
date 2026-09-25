@@ -11,8 +11,8 @@ use crate::model::{
     technique_color, Bar, Document, Event, Note, NoteValue, Strum, Technique, TuningLabel,
 };
 use crate::staff::{
-    arc, arrow_head, barline, dashed, ellipse, label_width, pt_for_cap, quad, time_signature, wave,
-    Barline, FAINT, INK, PAPER,
+    arc, arrow_head, barline, dashed, ellipse, label_width, pt_for_cap, quad, tie, time_signature,
+    wave, Barline, FAINT, INK, PAPER,
 };
 use crate::{Align, Prim, P};
 
@@ -324,7 +324,7 @@ fn render_bar(
             if note.tie_next {
                 if let Some(&nx) = layout.events.get(ei + 1) {
                     let half = label_width(&fret_label(note), pt_for_cap(cap)) * 0.5;
-                    out.push(arc(
+                    out.push(tie(
                         P {
                             x: x + half + 0.5,
                             y: y - cap * 0.35,

@@ -1019,7 +1019,8 @@ fn the_live_strip_puts_every_bar_on_one_line() {
     let natural: f32 = doc
         .bars
         .iter()
-        .map(|b| engrave::natural_bar_width(b, doc.note_spacing))
+        .enumerate()
+        .map(|(i, b)| engrave::natural_bar_width(b, doc.time_sig_at(i), doc.note_spacing))
         .sum();
     assert!((strip.end_x() - (strip.x + natural)).abs() < 0.01);
     assert!(strip.height > 0.0);
