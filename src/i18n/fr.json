@@ -131,6 +131,7 @@
   "help.legend_title": "Techniques de jeu",
   "help.shortcuts_title": "Raccourcis clavier",
   "help.key_digits": "0 à 9 — saisit le numéro de frette (deux chiffres tapés en moins d'une seconde se combinent, ex. 1 puis 2 écrit la frette 12)",
+  "help.key_techniques": "Une lettre (ou < et /) arme une technique de jeu et la pose sur la sélection, comme son bouton de la palette : chaque touche est inscrite sur son bouton et dans la légende ci-dessus",
   "help.key_backspace": "Retour arrière — efface la note sélectionnée",
   "help.key_space": "Espace — transforme la travée sélectionnée en silence",
   "help.key_arrows": "Flèches — Haut/Bas change de corde, Gauche/Droite change de travée, et la vue défile pour suivre la sélection",

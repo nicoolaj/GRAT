@@ -46,60 +46,38 @@ const SHORTCUT_REPEAT: egui::KeyboardShortcut =
 const SHORTCUT_LIVE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::L);
 
-/// Every playing technique with its i18n key and the kind it belongs to, for the Help
-/// legend and the Edit > note styles submenu. One representative field value per
-/// variant, same choices as `tests/visual.rs::technique_bar`. Entries of one kind are
-/// consecutive — that is what draws the group headings in the submenu — and a
-/// technique's position here is its bit in `EditorState::tech_shown`.
-const TECH_LEGEND: &[(Technique, &str, &str)] = &[
-    (Technique::Plain, "tech.plain", "techkind.plain"),
-    (Technique::HammerOn, "tech.hammer_on", "techkind.legato"),
-    (Technique::PullOff, "tech.pull_off", "techkind.legato"),
-    (Technique::Slide, "tech.slide", "techkind.legato"),
-    (Technique::SlideShift, "tech.slide_shift", "techkind.legato"),
-    (
-        Technique::SlideIn { from_fret: 3 },
-        "tech.slide_in",
-        "techkind.legato",
-    ),
-    (Technique::Grace, "tech.grace", "techkind.legato"),
-    (
-        Technique::Bend { quarters: 4 },
-        "tech.bend",
-        "techkind.bend",
-    ),
-    (
-        Technique::BendRelease { quarters: 2 },
-        "tech.bend_release",
-        "techkind.bend",
-    ),
-    (
-        Technique::PreBend { quarters: 4 },
-        "tech.pre_bend",
-        "techkind.bend",
-    ),
-    (Technique::Vibrato, "tech.vibrato", "techkind.ornament"),
-    (
-        Technique::WideVibrato,
-        "tech.wide_vibrato",
-        "techkind.ornament",
-    ),
-    (
-        Technique::Trill { to_fret: 9 },
-        "tech.trill",
-        "techkind.ornament",
-    ),
-    (Technique::Harmonic, "tech.harmonic", "techkind.harmonic"),
-    (
-        Technique::PinchHarmonic,
-        "tech.pinch_harmonic",
-        "techkind.harmonic",
-    ),
-    (Technique::Tap, "tech.tap", "techkind.attack"),
-    (Technique::Slap, "tech.slap", "techkind.attack"),
-    (Technique::Pop, "tech.pop", "techkind.attack"),
-    (Technique::Dead, "tech.dead", "techkind.muted"),
-    (Technique::Ghost, "tech.ghost", "techkind.muted"),
+/// Every playing technique with its i18n key, the kind it belongs to, and the key
+/// that arms it in the editor, for the palette, the Help legend and the Edit > note
+/// styles submenu. One representative field value per variant, same choices as
+/// `tests/visual.rs::technique_bar`. Entries of one kind are consecutive — that is
+/// what draws the group headings in the submenu — and a technique's position here
+/// is its bit in `EditorState::tech_shown`.
+///
+/// The keys are mnemonic (the glyph printed, or the name) and never a character
+/// the AZERTY top row types without Shift: there, the 5 key alone is "(", and a
+/// ghost note on "(" would catch every fret typed without Shift.
+#[rustfmt::skip]
+const TECH_LEGEND: &[(Technique, &str, &str, char)] = &[
+    (Technique::Plain, "tech.plain", "techkind.plain", 'n'),
+    (Technique::HammerOn, "tech.hammer_on", "techkind.legato", 'h'),
+    (Technique::PullOff, "tech.pull_off", "techkind.legato", 'p'),
+    (Technique::Slide, "tech.slide", "techkind.legato", 's'),
+    (Technique::SlideShift, "tech.slide_shift", "techkind.legato", 'S'),
+    (Technique::SlideIn { from_fret: 3 }, "tech.slide_in", "techkind.legato", '/'),
+    (Technique::Grace, "tech.grace", "techkind.legato", 'g'),
+    (Technique::Bend { quarters: 4 }, "tech.bend", "techkind.bend", 'b'),
+    (Technique::BendRelease { quarters: 2 }, "tech.bend_release", "techkind.bend", 'r'),
+    (Technique::PreBend { quarters: 4 }, "tech.pre_bend", "techkind.bend", 'B'),
+    (Technique::Vibrato, "tech.vibrato", "techkind.ornament", 'v'),
+    (Technique::WideVibrato, "tech.wide_vibrato", "techkind.ornament", 'V'),
+    (Technique::Trill { to_fret: 9 }, "tech.trill", "techkind.ornament", 't'),
+    (Technique::Harmonic, "tech.harmonic", "techkind.harmonic", '<'),
+    (Technique::PinchHarmonic, "tech.pinch_harmonic", "techkind.harmonic", 'a'),
+    (Technique::Tap, "tech.tap", "techkind.attack", 'T'),
+    (Technique::Slap, "tech.slap", "techkind.attack", 'l'),
+    (Technique::Pop, "tech.pop", "techkind.attack", 'P'),
+    (Technique::Dead, "tech.dead", "techkind.muted", 'x'),
+    (Technique::Ghost, "tech.ghost", "techkind.muted", 'o'),
 ];
 
 /// Which palette technique buttons are switched on, remembered across sessions.
@@ -887,11 +865,12 @@ impl TablaturesApp {
                     // ones left out give the palette its room back.
                     ui.menu_button(t("menu.note_styles"), |ui| {
                         let mut last_kind = "";
-                        for (_tech, _key, group) in TECH_LEGEND.iter() {
+                        for (_tech, _key, group, _) in TECH_LEGEND.iter() {
                             if *group != last_kind {
                                 ui.menu_button(t(group), |ui| {
                                     // Emit all techniques in this category.
-                                    for (j, (tech2, key2, group2)) in TECH_LEGEND.iter().enumerate()
+                                    for (j, (tech2, key2, group2, _)) in
+                                        TECH_LEGEND.iter().enumerate()
                                     {
                                         if *group2 != *group {
                                             continue;
@@ -1459,13 +1438,14 @@ impl eframe::App for TablaturesApp {
                 ui.add_space(8.0);
 
                 ui.heading(t("help.legend_title"));
-                for &(tech, key, _) in TECH_LEGEND {
+                for &(tech, key, _, shortcut) in TECH_LEGEND {
                     ui.horizontal(|ui| {
                         let (swatch, _) =
                             ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
                         ui.painter()
                             .rect_filled(swatch, 3.0, canvas::rgb(technique_color(&tech)));
                         ui.label(t(key));
+                        ui.weak(format!("({shortcut})"));
                     });
                 }
 
@@ -1497,6 +1477,7 @@ impl eframe::App for TablaturesApp {
                 }
                 for key in [
                     "help.key_digits",
+                    "help.key_techniques",
                     "help.key_backspace",
                     "help.key_space",
                     "help.key_arrows",
@@ -1940,9 +1921,28 @@ mod tests {
                 Technique::Trill { .. } => 19,
             }
         }
-        let mut seen: Vec<usize> = TECH_LEGEND.iter().map(|&(t, _, _)| number(t)).collect();
+        let mut seen: Vec<usize> = TECH_LEGEND.iter().map(|&(t, _, _, _)| number(t)).collect();
         seen.sort_unstable();
         assert_eq!(seen, (0..20).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn every_technique_key_is_free_to_type() {
+        let keys: Vec<char> = TECH_LEGEND.iter().map(|row| row.3).collect();
+        let mut distinct = keys.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(distinct.len(), keys.len(), "one technique per key");
+        // Digits are frets; ".-+= " are the editor's own keys; the rest is what
+        // an AZERTY top row types without Shift (Mac and PC), where the digits
+        // themselves need Shift.
+        let taken = "0123456789.-+= &é\"'(§è!çà)_";
+        for k in keys {
+            assert!(
+                !taken.contains(k),
+                "{k:?} is already typed for something else"
+            );
+        }
     }
 
     #[test]

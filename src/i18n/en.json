@@ -131,6 +131,7 @@
   "help.legend_title": "Playing techniques",
   "help.shortcuts_title": "Keyboard shortcuts",
   "help.key_digits": "0–9 — type the fret number (two digits within under a second combine into one, e.g. 1 then 2 writes fret 12)",
+  "help.key_techniques": "A letter (or < and /) arms a playing technique and sets it on the selection, like its palette button: each key is written on its button and in the legend above",
   "help.key_backspace": "Backspace — clear the selected note",
   "help.key_space": "Space — turn the selected beat into a rest",
   "help.key_arrows": "Arrow keys — Up/Down changes string, Left/Right changes beat, and the view scrolls to follow the selection",

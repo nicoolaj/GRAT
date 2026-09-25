@@ -4,6 +4,16 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.8.0] — 2026-09-26
+
+### Ajouté
+- Raccourcis clavier des techniques dans l'éditeur : une touche arme la technique et la pose sur
+  la sélection, comme son bouton. n normal, h hammer-on, p pull-off, s slide lié, S slide gratté,
+  / slide d'approche, g appogiature, b bend, r bend relâché, B pré-bend, v vibrato, V vibrato
+  large, t trille, < harmonique, a harmonique pincée, T tapping, l slap, P pop, x étouffée,
+  o fantôme. Chaque touche est inscrite sur son bouton de la palette et dans l'aide. Aucune n'est
+  un caractère que la rangée du haut d'un clavier AZERTY tape sans Maj.
+
 ## [4.7.0] — 2026-09-26
 
 ### Ajouté

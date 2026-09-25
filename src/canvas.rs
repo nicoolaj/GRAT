@@ -377,7 +377,7 @@ pub(crate) fn paint_decoration(
 pub(crate) fn tech_visible(state: &EditorState, tech: &Technique) -> bool {
     crate::TECH_LEGEND
         .iter()
-        .position(|(t, _, _)| std::mem::discriminant(t) == std::mem::discriminant(tech))
+        .position(|(t, _, _, _)| std::mem::discriminant(t) == std::mem::discriminant(tech))
         .is_none_or(|i| state.tech_shown & (1 << i) != 0)
 }
 
@@ -1214,12 +1214,17 @@ pub fn show(
                         );
                     }
                     match ev {
+                        // A digit is a fret; a technique's key arms it and sets it
+                        // on the selection, as its palette button does.
                         egui::Event::Text(txt) => {
                             for ch in txt.chars() {
-                                if let Some(d) = ch.to_digit(10) {
-                                    if handle_digit(state, doc, d, now) {
-                                        action = Some(Action::Changed);
-                                    }
+                                let changed = match ch.to_digit(10) {
+                                    Some(d) => handle_digit(state, doc, d, now),
+                                    None => technique_for_key(state, ch)
+                                        .is_some_and(|tech| apply_technique(state, doc, tech)),
+                                };
+                                if changed {
+                                    action = Some(Action::Changed);
                                 }
                             }
                         }
@@ -1376,28 +1381,46 @@ fn apply_param(
     }
 }
 
+/// `tech` carrying the number armed for it, if it takes one. The legend and the
+/// call sites only hold a placeholder number (or none): stamping the armed value
+/// in here keeps a button, its key and a click in agreement with `param_slot`,
+/// so `state.tool_tech` never holds a stale number.
+fn armed(state: &mut EditorState, tech: Technique) -> Technique {
+    match param_slot(state, &tech) {
+        Some(slot) => tech.with_param(*slot),
+        None => tech,
+    }
+}
+
+/// The technique a typed character arms, per `TECH_LEGEND`.
+fn technique_for_key(state: &mut EditorState, ch: char) -> Option<Technique> {
+    let tech = crate::TECH_LEGEND.iter().find(|row| row.3 == ch)?.0;
+    Some(armed(state, tech))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn tech_button(
     ui: &mut egui::Ui,
     state: &mut EditorState,
     doc: &mut Document,
-    mut tech: Technique,
+    tech: Technique,
     key: &str,
+    shortcut: char,
     action: &mut Option<Action>,
 ) {
     if !tech_visible(state, &tech) {
         return;
     }
-    // The call site only ever passes a placeholder number (or none) -- stamp in the
-    // current armed value here so the button and any click always agree with
-    // param_slot, and state.tool_tech can never hold a stale number.
-    if let Some(slot) = param_slot(state, &tech) {
-        tech = tech.with_param(*slot);
-    }
+    let tech = armed(state, tech);
     let color = rgb(model::technique_color(&tech));
-    let armed = std::mem::discriminant(&state.tool_tech) == std::mem::discriminant(&tech);
+    let is_armed = std::mem::discriminant(&state.tool_tech) == std::mem::discriminant(&tech);
 
     let resp = match tech.param() {
-        None => ui.add(egui::Button::new(egui::RichText::new(t(key)).color(color)).selected(armed)),
+        None => ui.add(
+            egui::Button::new(egui::RichText::new(t(key)).color(color))
+                .shortcut_text(shortcut.to_string())
+                .selected(is_armed),
+        ),
         Some((v0, range)) => {
             let mut v = v0;
             // A drag may only reach the selected note when that note already
@@ -1417,7 +1440,8 @@ fn tech_button(
                     ui.horizontal(|ui| {
                         let btn = ui.add(
                             egui::Button::new(egui::RichText::new(t(key)).color(color))
-                                .selected(armed),
+                                .shortcut_text(shortcut.to_string())
+                                .selected(is_armed),
                         );
                         let dv = ui
                             .add(egui::DragValue::new(&mut v).range(range.clone()))
@@ -1664,8 +1688,8 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     ui.separator();
     // One button per technique, in `TECH_LEGEND`'s order: the Help legend's and
     // the note-styles menu's, grouped by kind.
-    for &(tech, key, _) in crate::TECH_LEGEND {
-        tech_button(ui, state, doc, tech, key, &mut action);
+    for &(tech, key, _, shortcut) in crate::TECH_LEGEND {
+        tech_button(ui, state, doc, tech, key, shortcut, &mut action);
     }
 
     ui.separator();
@@ -1823,15 +1847,15 @@ mod tests {
     #[test]
     fn every_technique_has_its_own_visibility_bit() {
         let mut state = EditorState::default();
-        for (i, (tech, _, _)) in crate::TECH_LEGEND.iter().enumerate() {
+        for (i, (tech, _, _, _)) in crate::TECH_LEGEND.iter().enumerate() {
             assert!(tech_visible(&state, tech), "all styles show by default");
             state.tech_shown = !(1 << i);
             assert!(!tech_visible(&state, tech), "bit {i} hides its own style");
             assert!(
                 crate::TECH_LEGEND
                     .iter()
-                    .filter(|(t, _, _)| std::mem::discriminant(t) != std::mem::discriminant(tech))
-                    .all(|(t, _, _)| tech_visible(&state, t)),
+                    .filter(|(t, _, _, _)| std::mem::discriminant(t) != std::mem::discriminant(tech))
+                    .all(|(t, _, _, _)| tech_visible(&state, t)),
                 "and hides nothing else"
             );
             state.tech_shown = u32::MAX;
@@ -1841,7 +1865,7 @@ mod tests {
     #[test]
     fn every_parameterised_technique_has_an_armed_slot() {
         let mut state = EditorState::default();
-        for (tech, _, _) in crate::TECH_LEGEND.iter() {
+        for (tech, _, _, _) in crate::TECH_LEGEND.iter() {
             let slot = param_slot(&mut state, tech);
             assert_eq!(
                 tech.param().is_some(),
@@ -2176,6 +2200,21 @@ mod tests {
         });
         assert!(!apply_technique(&mut state, &mut doc, Technique::HammerOn));
         assert_eq!(state.tool_tech, Technique::HammerOn);
+    }
+
+    #[test]
+    fn a_technique_key_arms_it_with_its_number_and_sets_it() {
+        let (mut state, mut doc) = range_of_notes();
+        state.range_anchor = None;
+        state.bend_quarters = 3;
+        let bend = technique_for_key(&mut state, 'b');
+        assert_eq!(bend, Some(Technique::Bend { quarters: 3 }));
+        assert!(apply_technique(&mut state, &mut doc, bend.unwrap()));
+        assert_eq!(
+            doc.bars[1].events[1].notes[0].tech,
+            Technique::Bend { quarters: 3 }
+        );
+        assert_eq!(technique_for_key(&mut state, 'z'), None);
     }
 
     #[test]
