@@ -92,32 +92,26 @@ fn group_span(time_sig: (u8, u8), bar: &Bar) -> u32 {
 }
 
 /// Paper each event of `bar` moves the cursor on by, its lead-in apart: the
-/// duration slot, at least a quaver's when the event is tied onward (or its tie
-/// is squashed between two heads), widened by [`GROUP_GAP`] where the next event
-/// opens a group. The last event's slot is the air before the barline, floored
-/// at [`BAR_LEAD_MM`].
+/// duration slot, widened by [`GROUP_GAP`] where the next event opens a group.
+/// The last event's slot is the air before the barline, floored at
+/// [`BAR_LEAD_MM`].
+///
+/// A tied note keeps the slot of its own value. Flooring it at a quaver's, so
+/// every tie got the same room, made a tied sixteenth look longer than the
+/// dotted quaver before it -- the rhythm is what the spacing shows first. Short
+/// ties are `notation::ties`' business instead.
 ///
 /// The one place slots are decided: [`natural_bar_width`] sums them and
 /// [`system_spacing`] walks them, so a bar's width and its columns cannot drift.
 fn slots(bar: &Bar, time_sig: (u8, u8), h: f32) -> Vec<f32> {
     let span = group_span(time_sig, bar);
     let onsets = onsets(bar);
-    let tie_room = natural_event_width(
-        &Dur {
-            base: NoteValue::Eighth,
-            dots: 0,
-        },
-        h,
-    );
     let last = bar.events.len().saturating_sub(1);
     bar.events
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            let mut w = natural_event_width(&e.dur, h);
-            if e.notes.iter().any(|n| n.tie_next) {
-                w = w.max(tie_room);
-            }
+            let w = natural_event_width(&e.dur, h);
             if i == last {
                 w.max(BAR_LEAD_MM * h)
             } else if onsets[i + 1].is_multiple_of(span) {

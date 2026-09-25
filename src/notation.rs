@@ -802,13 +802,25 @@ fn ties(
             // in beam groups with opposite stems; only a pair stemmed down on
             // both sides puts the tie above, where nothing collides with it.
             let sign = if up || next_up { -1.0 } else { 1.0 };
+            // On the outside of both chords -- always so for a single note -- the
+            // tie tucks under (or over) the heads, its ends near their centres, the
+            // way an engraver sets it: between two close heads, edge to edge, it
+            // would be a speck. An inner note of a chord has a neighbour a third
+            // away on that side, so its tie stays between the heads.
+            let outer =
+                |hs: &[Head], h: &Head| hs.iter().all(|o| sign * (h.half - o.half) as f32 >= 0.0);
+            let (inset, lift) = if outer(&heads, head) && outer(&next_heads, target) {
+                (0.45, HEAD_RY + 0.2)
+            } else {
+                (1.15, 0.30)
+            };
             let a = P {
-                x: head.x + HEAD_RX * sp * 1.15,
-                y: head.y + sign * 0.30 * sp,
+                x: head.x + HEAD_RX * sp * inset,
+                y: head.y + sign * lift * sp,
             };
             let b = P {
-                x: target.x - HEAD_RX * sp * 1.15,
-                y: target.y + sign * 0.30 * sp,
+                x: target.x - HEAD_RX * sp * inset,
+                y: target.y + sign * lift * sp,
             };
             out.push(crate::staff::tie(a, b, sign * 0.62 * sp, 0.11 * sp, INK));
         }

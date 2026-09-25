@@ -489,10 +489,11 @@ fn groups_breathe_apart_by_the_beat_or_the_half_bar() {
 }
 
 #[test]
-fn every_tie_gets_the_same_room() {
-    // The bar that showed the problem: `8th. 8th. q 8th 8th 8th` in 4/4 prints as
-    // `8th. 16th~ | 8th 8th~ | 8th 8th | 8th 8th`. The tied sixteenth used to get
-    // a sixteenth's width and a squashed tie beside the quaver's long one.
+fn a_tied_note_keeps_the_room_of_its_own_value() {
+    // `8th. 8th. q 8th 8th 8th` in 4/4 prints as
+    // `8th. 16th~ | 8th 8th~ | 8th 8th | 8th 8th`. Giving every tied note a
+    // quaver's room evened the ties out but spaced the tied sixteenth wider than
+    // the dotted quaver before it: the spacing stopped showing the rhythm.
     let doc = grat::engrave::for_export(&doc_with(Bar {
         events: vec![
             dotted(NoteValue::Eighth, vec![note(5)]),
@@ -514,7 +515,15 @@ fn every_tie_gets_the_same_room() {
         .collect();
     assert_eq!(tied, vec![1, 3], "the sixteenth and the quaver are tied on");
     let s = steps(&doc);
-    assert!((s[1] - s[3]).abs() < 0.001, "tie rooms differ: {s:?}");
+    // Both close a beat, so both carry the same group gap: their ratio is the
+    // bare duration table's, 16th against 8th.
+    let slot = |base| grat::engrave::natural_event_width(&Dur { base, dots: 0 }, 1.0);
+    let want = slot(NoteValue::Sixteenth) / slot(NoteValue::Eighth);
+    assert!((s[1] / s[3] - want).abs() < 0.001, "{s:?}");
+    assert!(
+        s[1] < s[0],
+        "the sixteenth reads shorter than the dotted quaver: {s:?}"
+    );
 }
 
 #[test]

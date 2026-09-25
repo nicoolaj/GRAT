@@ -4,6 +4,15 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.1.1] — 2026-09-25
+
+### Corrigé
+- Une note liée garde l'espace de sa propre durée : en 4.1.0, une double-croche liée recevait
+  la place d'une croche et paraissait plus longue que la croche pointée qui la précède.
+- Sur la portée, la liaison d'une note seule (ou de la note extérieure d'un accord) passe sous
+  les têtes, les extrémités près de leur centre, comme en gravure : même entre deux notes
+  rapprochées elle reste lisible, et elle a la longueur de la liaison de la tablature.
+
 ## [4.1.0] — 2026-09-25
 
 ### Modifié
@@ -13,7 +22,8 @@ projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
   (au milieu de la mesure en 4/4) quand elle ne va pas plus vite que la noire.
 - **Liaisons uniformes** : une note liée reçoit au moins la place d'une croche, et la tablature
   comme la portée dessinent la même courbe, plus plate quand elle est courte. Une double-croche
-  liée n'a plus de liaison écrasée, ni de « U » profond dans la tab.
+  liée n'a plus de liaison écrasée, ni de « U » profond dans la tab. (Place minimale retirée en
+  4.1.1.)
 - **Fin de mesure resserrée** : l'espace avant la barre de mesure est celui de la durée de la
   dernière note, sans marge en plus (et jamais moins que l'espace en début de mesure).
 
@@ -356,6 +366,7 @@ Première version.
 - Édition à la souris et palette d'outils.
 - Export PDF (menu, Cmd+E, `--export`), pages À propos et Aide, icône macOS, exemples.
 
+[4.1.1]: https://github.com/nicoolaj/GRAT/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/nicoolaj/GRAT/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/nicoolaj/GRAT/compare/v3.6.1...v4.0.0
 [3.6.1]: https://github.com/nicoolaj/GRAT/compare/v3.6.0...v3.6.1
