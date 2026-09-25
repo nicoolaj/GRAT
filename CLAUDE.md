@@ -44,7 +44,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `model.rs` | `Document` / `Bar` / `Event` / `Note`, note values in ticks, techniques and their colours, instruments and the `TUNINGS` preset table, `retune` (keep frets or keep pitches), serde |
 | `i18n.rs` + `i18n/*.json` | locale detection, `t(key)`, note and rest names (they differ FR/US) |
 | `engrave.rs` | rhythm only: beat grouping, beams, proportional spacing, justification, and the print normalisation (`for_export`: merge rests, split notes straddling a beat into tied pieces). No pitch, no glyphs |
-| `staff.rs` | furniture both rows share: barlines and repeats, rests, arrowheads, waves, text metrics |
+| `staff.rs` | furniture every row shares: the staff head's width (`HEAD_MM`), barlines and repeats (`barlines` resolves them once for all rows), rests, arrowheads, waves, text metrics |
 | `notation.rs` | the five-line staff: clef (treble 8vb, treble or bass 8vb by instrument), heads, stems, beams, accidentals, ties, ledger lines |
 | `tablature.rs` | the tablature row: one line per string (`doc.tuning.len()`), fret labels, all 20 technique glyphs, the optional string names; and the strum, rhythm and chord-name rows (chord recognition included, re-entrant tunings never write a slash bass) |
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, hit boxes |
@@ -67,7 +67,7 @@ never know about pages, egui or PDF.
    `canvas.rs` flips; nothing else does.
 3. **`origin` means the first barline.** For every row renderer, `origin.x` is where the music
    starts and the staff head (the "TAB" letters, the clef, the time signature) is drawn by the
-   renderer itself in `[origin.x - HEAD_MM, origin.x]`. The layout reserves that room.
+   renderer itself in `[origin.x - staff::HEAD_MM, origin.x]`. The layout reserves that room.
    `origin.y` is the bottom string line / bottom staff line / strum or chord-name baseline — except
    the rhythm row, whose stems hang from `origin.y`, its top edge.
 4. **`Prim` order is paint order.** The tablature row knocks the string line out behind each fret
@@ -202,9 +202,11 @@ never know about pages, egui or PDF.
 
 **Add a playing technique.** Add the variant to `model::Technique`, a `COLOR_*` constant and its arm
 in `technique_color`, an arm in `tablature::technique` for the glyph (and in `tablature::fret_label`
-if it changes the printed number), a `tech.*` key in both language files, and a button in the
-`canvas.rs` palette. Then add it to the row in `tests/visual.rs::technique_bar` and look at the
-sheet.
+if it changes the printed number), a `tech.*` key in both language files, and a row in `main.rs`'s
+`TECH_LEGEND`: that row is its palette button, its Help line and its Edit > note styles entry
+(`every_technique_has_exactly_one_legend_entry` stops compiling until the variant is numbered, and
+fails until it has its row). Then add it to the row in `tests/visual.rs::technique_bar` and look
+at the sheet.
 
 **Add a language.** Drop `src/i18n/xx.json` next to the others and add one line to
 `i18n::LANGS`. Missing keys fall back to English, so a partial file is safe to ship.

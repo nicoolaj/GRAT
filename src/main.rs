@@ -1505,6 +1505,40 @@ mod tests {
     }
 
     #[test]
+    fn every_technique_has_exactly_one_legend_entry() {
+        // No wildcard arm: a new `Technique` stops this compiling until it gets a
+        // number here, and then the count below asks for its `TECH_LEGEND` row --
+        // which is its palette button, its Help line and its note-styles entry.
+        fn number(t: Technique) -> usize {
+            match t {
+                Technique::Plain => 0,
+                Technique::HammerOn => 1,
+                Technique::PullOff => 2,
+                Technique::Slide => 3,
+                Technique::SlideShift => 4,
+                Technique::SlideIn { .. } => 5,
+                Technique::Grace => 6,
+                Technique::Bend { .. } => 7,
+                Technique::BendRelease { .. } => 8,
+                Technique::PreBend { .. } => 9,
+                Technique::Vibrato => 10,
+                Technique::WideVibrato => 11,
+                Technique::Harmonic => 12,
+                Technique::PinchHarmonic => 13,
+                Technique::Tap => 14,
+                Technique::Slap => 15,
+                Technique::Pop => 16,
+                Technique::Dead => 17,
+                Technique::Ghost => 18,
+                Technique::Trill { .. } => 19,
+            }
+        }
+        let mut seen: Vec<usize> = TECH_LEGEND.iter().map(|&(t, _, _)| number(t)).collect();
+        seen.sort_unstable();
+        assert_eq!(seen, (0..20).collect::<Vec<_>>());
+    }
+
+    #[test]
     fn the_pdf_name_is_the_title_as_a_file_system_takes_it() {
         assert_eq!(pdf_file_name(""), "untitled.pdf");
         assert_eq!(pdf_file_name("  ...  "), "untitled.pdf");

@@ -74,7 +74,7 @@ fn justification_scale(naturals: &[f32], music_width: f32) -> f32 {
 /// Lay out the whole document onto A4 pages.
 pub fn paginate(doc: &Document) -> Vec<Page> {
     let usable_width = PAGE_W_MM - 2.0 * MARGIN_MM;
-    let music_width = usable_width - tablature::HEAD_MM;
+    let music_width = usable_width - staff::HEAD_MM;
     let systems = break_lines(doc, music_width);
 
     // Each system's target width: its own natural width taken through the one
@@ -188,19 +188,12 @@ pub fn strip(doc: &Document) -> Strip {
     let spacing = engrave::system_spacing(doc, 0..doc.bars.len(), None);
     let mut prims = Vec::new();
     let mut hits = Vec::new();
-    place_block(
-        doc,
-        &spacing,
-        tablature::HEAD_MM,
-        height,
-        &mut prims,
-        &mut hits,
-    );
+    place_block(doc, &spacing, staff::HEAD_MM, height, &mut prims, &mut hits);
     Strip {
         prims,
         hits,
         spacing,
-        x: tablature::HEAD_MM,
+        x: staff::HEAD_MM,
         height,
     }
 }
@@ -238,7 +231,7 @@ fn break_lines(doc: &Document, music_width: f32) -> Vec<Range<usize>> {
 /// bars at all untouched. It settles after a few pushes — an empty bar is a
 /// little narrower than a full system — but the loop is capped regardless.
 pub fn ensure_trailing_blank_system(doc: &mut Document) {
-    let music_width = PAGE_W_MM - 2.0 * MARGIN_MM - tablature::HEAD_MM;
+    let music_width = PAGE_W_MM - 2.0 * MARGIN_MM - staff::HEAD_MM;
     for _ in 0..64 {
         let systems = break_lines(doc, music_width);
         let Some(last) = systems.last() else { return };
@@ -266,7 +259,7 @@ fn render_page(
 ) -> Page {
     let mut prims = Vec::new();
     let mut hits = Vec::new();
-    let left_x = MARGIN_MM + tablature::HEAD_MM;
+    let left_x = MARGIN_MM + staff::HEAD_MM;
 
     let mut top = PAGE_H_MM - MARGIN_MM;
     if page_no == 1 {

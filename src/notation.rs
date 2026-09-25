@@ -12,7 +12,7 @@ use std::ops::Range;
 
 use crate::engrave::{beam_groups, beam_run_span, beam_runs, BeamGroup, Spacing};
 use crate::model::{technique_color, Document, Event, Instrument, Note, NoteValue, Technique};
-use crate::staff::{barline, ellipse, rest, time_signature, Barline, INK, PAPER};
+use crate::staff::{barline, barlines, ellipse, rest, time_signature, HEAD_MM, INK, PAPER};
 use crate::{Prim, Rgb, P};
 
 /// Distance between two staff lines, in millimetres.
@@ -132,18 +132,13 @@ fn staff_position(doc: &Document, note: &Note) -> (i32, bool) {
     (diatonic - bottom, sharp)
 }
 
-/// Horizontal room reserved at the left of every system for the clef and the
-/// time signature. The layout starts the music at `origin.x`; the staff head is
-/// drawn in `[origin.x - HEAD_MM, origin.x]`.
-pub const HEAD_MM: f32 = 13.0;
-
 /// Draw the notation staff for one system.
 ///
 /// `origin` is the first barline: x of the music start, y of the BOTTOM staff line.
 pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
-    let Some(first) = spacing.bars.first() else {
+    if spacing.bars.is_empty() {
         return;
-    };
+    }
     let sp = SPACE_MM;
     let right = origin.x + spacing.width;
     // The lines run on under a courtesy time signature past the closing barline.
@@ -174,31 +169,9 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
     // above or below.
     let top = origin.y + 4.0 * sp;
     let dot_ys = [origin.y + 1.5 * sp, origin.y + 2.5 * sp];
-    for (i, bar) in spacing.bars.iter().enumerate() {
-        let x = origin.x + bar.x;
-        let closes = if i == 0 {
-            None
-        } else {
-            doc.bars
-                .get(spacing.bars[i - 1].index)
-                .and_then(|b| b.repeat_end)
-        };
-        let opens = doc.bars.get(bar.index).is_some_and(|b| b.repeat_start);
-        let kind = match (closes, opens) {
-            (Some(t), true) => Barline::RepeatBoth(t),
-            (Some(t), false) => Barline::RepeatEnd(t),
-            (None, true) => Barline::RepeatStart,
-            (None, false) => Barline::Single,
-        };
-        barline(kind, x, origin.y, top, &dot_ys, out);
+    for (x, kind) in barlines(doc, spacing) {
+        barline(kind, origin.x + x, origin.y, top, &dot_ys, out);
     }
-    let last = spacing.bars.last().unwrap_or(first);
-    let closing = match doc.bars.get(last.index).and_then(|b| b.repeat_end) {
-        Some(t) => Barline::RepeatEnd(t),
-        None if last.index + 1 >= doc.bars.len() => Barline::Final,
-        None => Barline::Double,
-    };
-    barline(closing, right, origin.y, top, &dot_ys, out);
     // The metre: at the start of the piece, where it changes, and a courtesy
     // signature closing a system whose successor opens with a change.
     for (x, sig) in crate::engrave::time_sig_marks(doc, spacing) {
@@ -238,13 +211,17 @@ fn render_bar(
     // which side of the stem a second sits on depends on it.
     let mut direction: Vec<Option<bool>> = vec![None; bar.events.len()];
     for group in &groups {
-        let up = group_stem_up(doc, bar, group);
+        let up = stems_up(
+            doc,
+            group.events.iter().flat_map(|&ei| &bar.events[ei].notes),
+        );
         for &ei in &group.events {
             direction[ei] = Some(up);
         }
     }
-    let dir_of =
-        |ei: usize, event: &Event| direction[ei].unwrap_or_else(|| stem_up_for(doc, event));
+    let dir_of = |ei: usize, event: &Event| {
+        direction[ei].unwrap_or_else(|| stems_up(doc, event.notes.iter()))
+    };
 
     // Accidentals hold until the end of the bar, so this memory is per bar.
     let mut sharped: Vec<i32> = Vec::new();
@@ -323,12 +300,12 @@ struct Head {
     offset: bool,
 }
 
-/// The head furthest from the middle line decides which way the stem points; on a
-/// tie the stem goes down. Averaging the heads instead would get wide chords wrong.
-fn stem_up_for(doc: &Document, event: &Event) -> bool {
-    let furthest = event
-        .notes
-        .iter()
+/// Which way the stems of `notes` point -- one chord, or a whole beamed run,
+/// which shares one direction. The head furthest from the middle line decides;
+/// on a tie the stems go down. Averaging the heads instead would get wide chords
+/// wrong.
+fn stems_up<'a>(doc: &Document, notes: impl Iterator<Item = &'a Note>) -> bool {
+    let furthest = notes
         .map(|note| staff_position(doc, note).0 - 4)
         .max_by_key(|d| d.abs())
         .unwrap_or(0);
@@ -643,19 +620,6 @@ fn flag(tip: P, sp: f32, up: bool, n: u8, out: &mut Vec<Prim>) {
     }
 }
 
-/// One direction for a whole beamed run, decided by the head furthest from the
-/// middle line across the entire run.
-fn group_stem_up(doc: &Document, bar: &crate::model::Bar, group: &BeamGroup) -> bool {
-    let furthest = group
-        .events
-        .iter()
-        .flat_map(|&ei| bar.events[ei].notes.iter())
-        .map(|note| staff_position(doc, note).0 - 4)
-        .max_by_key(|d| d.abs())
-        .unwrap_or(0);
-    furthest < 0
-}
-
 /// Stems and beams for one beamed run.
 fn beam_group(
     doc: &Document,
@@ -666,7 +630,10 @@ fn beam_group(
     sp: f32,
     out: &mut Vec<Prim>,
 ) {
-    let up = group_stem_up(doc, bar, group);
+    let up = stems_up(
+        doc,
+        group.events.iter().flat_map(|&ei| &bar.events[ei].notes),
+    );
 
     // Column x, the head the stem grows from, and the head it has to clear.
     let mut cols: Vec<(f32, f32, f32)> = Vec::with_capacity(group.events.len());
@@ -775,12 +742,12 @@ fn ties(
         if !event.notes.iter().any(|n| n.tie_next) {
             continue;
         }
-        let up = direction[ei].unwrap_or_else(|| stem_up_for(doc, event));
+        let up = direction[ei].unwrap_or_else(|| stems_up(doc, event.notes.iter()));
         let next_up = direction
             .get(ei + 1)
             .copied()
             .flatten()
-            .unwrap_or_else(|| stem_up_for(doc, next));
+            .unwrap_or_else(|| stems_up(doc, next.notes.iter()));
         let heads = head_positions(doc, event, origin.x + x0, origin.y, sp, up);
         let next_heads = head_positions(doc, next, origin.x + x1, origin.y, sp, next_up);
 

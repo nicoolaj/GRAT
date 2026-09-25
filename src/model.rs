@@ -74,6 +74,30 @@ pub enum NoteValue {
 }
 
 impl NoteValue {
+    /// Every value, longest first: the palette's order, and the one `split_ticks`
+    /// is greedy in.
+    pub const ALL: [NoteValue; 6] = [
+        NoteValue::Whole,
+        NoteValue::Half,
+        NoteValue::Quarter,
+        NoteValue::Eighth,
+        NoteValue::Sixteenth,
+        NoteValue::ThirtySecond,
+    ];
+
+    /// The value a time signature's denominator counts in: 4 is a quarter. One
+    /// that names no value counts in quarters.
+    pub fn for_denominator(den: u8) -> NoteValue {
+        match den {
+            1 => NoteValue::Whole,
+            2 => NoteValue::Half,
+            8 => NoteValue::Eighth,
+            16 => NoteValue::Sixteenth,
+            32 => NoteValue::ThirtySecond,
+            _ => NoteValue::Quarter,
+        }
+    }
+
     /// Duration of this note value alone (no dots), in ticks.
     pub fn ticks(self) -> u32 {
         match self {
@@ -124,15 +148,7 @@ impl Dur {
     // ponytail: linear scan of the 24 combinations (6 values x 0..=MAX_DOTS) at load
     // time. If tuplets ever arrive, this is where a real decode table goes.
     pub fn from_ticks(ticks: u32) -> Option<Dur> {
-        const VALUES: [NoteValue; 6] = [
-            NoteValue::Whole,
-            NoteValue::Half,
-            NoteValue::Quarter,
-            NoteValue::Eighth,
-            NoteValue::Sixteenth,
-            NoteValue::ThirtySecond,
-        ];
-        VALUES.into_iter().find_map(|base| {
+        NoteValue::ALL.into_iter().find_map(|base| {
             (0..=MAX_DOTS)
                 .map(|dots| Dur { base, dots })
                 .find(|d| d.ticks() == ticks)
@@ -382,14 +398,7 @@ impl Bar {
     /// bar is complete from the start.
     pub fn new_empty(time_sig: Option<(u8, u8)>) -> Self {
         let sig = time_sig.unwrap_or((4, 4));
-        let beat = match sig.1 {
-            1 => NoteValue::Whole,
-            2 => NoteValue::Half,
-            8 => NoteValue::Eighth,
-            16 => NoteValue::Sixteenth,
-            32 => NoteValue::ThirtySecond,
-            _ => NoteValue::Quarter,
-        };
+        let beat = NoteValue::for_denominator(sig.1);
         let events = (0..sig.0)
             .map(|_| Event {
                 dur: Dur {
@@ -681,17 +690,18 @@ impl Document {
     /// `model`/`staff_order` pair becomes `rows`, rewritten on the raw JSON
     /// between the probe and the final parse below.
     pub fn from_json(s: &str) -> Result<Document, LoadError> {
-        #[derive(Deserialize)]
-        struct Probe {
-            #[serde(default = "default_format_version")]
-            format_version: u32,
-        }
-        let probe: Probe = serde_json::from_str(s).map_err(|_| LoadError::Parse)?;
-        if probe.format_version > FORMAT_VERSION {
-            return Err(LoadError::TooNew(probe.format_version));
-        }
         let mut json: serde_json::Value = serde_json::from_str(s).map_err(|_| LoadError::Parse)?;
-        if probe.format_version < 3 {
+        let version = match json.get("format_version") {
+            None => default_format_version(),
+            Some(v) => v
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .ok_or(LoadError::Parse)?,
+        };
+        if version > FORMAT_VERSION {
+            return Err(LoadError::TooNew(version));
+        }
+        if version < 3 {
             if let Some(obj) = json.as_object_mut() {
                 let model = obj.remove("model");
                 let order = obj.remove("staff_order");

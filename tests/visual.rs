@@ -5,7 +5,7 @@
 //! that the engraver produces primitives for every case, and it is the only way to
 //! actually look at beams, rests and the clef without building a PDF.
 
-use grat::{engrave, model::*, notation, tablature, Align, Prim, P};
+use grat::{engrave, model::*, notation, staff, tablature, Align, Prim, P};
 
 /// Millimetre page primitives to an SVG whose y axis is flipped back to screen order.
 fn svg(prims: &[Prim], w: f32, h: f32) -> String {
@@ -194,8 +194,8 @@ fn proof_sheet() {
     doc.title = "Engraving proof".into();
     doc.bars = vec![technique_bar(), span_bar(), rhythm_bar(), flag_bar()];
 
-    let music = 180.0 - tablature::HEAD_MM;
-    let left = 15.0 + tablature::HEAD_MM;
+    let music = 180.0 - staff::HEAD_MM;
+    let left = 15.0 + staff::HEAD_MM;
     let mut prims = Vec::new();
     let mut hits = Vec::new();
 
@@ -279,7 +279,7 @@ fn ties_proof_sheet() {
     }];
     let doc = engrave::for_export(&doc);
 
-    let left = 15.0 + tablature::HEAD_MM;
+    let left = 15.0 + staff::HEAD_MM;
     let sp = engrave::system_spacing(&doc, 0..1, Some(120.0));
     let mut prims = Vec::new();
     let mut hits = Vec::new();

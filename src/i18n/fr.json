@@ -211,5 +211,7 @@
   "dialog.custom_tuning_title": "Accordage personnalisé",
   "dialog.ok": "OK",
   "page.tuning": "Accordage :",
+  "page.let_ring": "laisser sonner",
+  "page.bend_full": "full",
   "pitch.middle_c_octave": "3"
 }

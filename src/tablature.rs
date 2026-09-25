@@ -11,8 +11,8 @@ use crate::model::{
     technique_color, Bar, Document, Event, Note, NoteValue, Strum, Technique, TuningLabel,
 };
 use crate::staff::{
-    arc, arrow_head, barline, dashed, ellipse, label_width, pt_for_cap, quad, tie, time_signature,
-    wave, Barline, FAINT, INK, PAPER,
+    arc, arrow_head, barline, barlines, dashed, ellipse, label_width, pt_for_cap, quad, tie,
+    time_signature, wave, FAINT, HEAD_MM, INK, PAPER,
 };
 use crate::{Align, Prim, P};
 
@@ -38,8 +38,6 @@ pub const RHYTHM_MM: f32 = 8.0;
 pub const CHORD_MM: f32 = 5.0;
 /// Height of the strumming / tapping row.
 pub const STRUM_MM: f32 = 5.5;
-/// Room reserved at the left of the system for the "TAB" label.
-pub const HEAD_MM: f32 = 13.0;
 
 const LINE_W: f32 = 0.22;
 const FRET_CAP_MM: f32 = 2.0;
@@ -106,7 +104,7 @@ fn bend_label(quarters: u8) -> String {
         1 => "1/4".into(),
         2 => "1/2".into(),
         3 => "3/4".into(),
-        4 => "full".into(),
+        4 => crate::i18n::t("page.bend_full"),
         6 => "1 1/2".into(),
         8 => "2".into(),
         q => format!("{}/4", q),
@@ -124,9 +122,9 @@ pub fn render(
     out: &mut Vec<Prim>,
     hits: &mut Vec<Hit>,
 ) {
-    let Some(first) = spacing.bars.first() else {
+    if spacing.bars.is_empty() {
         return;
-    };
+    }
     let right = origin.x + spacing.width;
     // The lines run on under a courtesy time signature past the closing barline.
     let next = spacing.bars.last().map_or(0, |b| b.index + 1);
@@ -164,30 +162,9 @@ pub fn render(
     let mid = origin.y + staff * 0.5;
     let off = if strings.is_multiple_of(2) { 1.0 } else { 0.5 } * STRING_MM;
     let dot_ys = [mid - off, mid + off];
-    for (i, bar) in spacing.bars.iter().enumerate() {
-        let closes = if i == 0 {
-            None
-        } else {
-            doc.bars
-                .get(spacing.bars[i - 1].index)
-                .and_then(|b| b.repeat_end)
-        };
-        let opens = doc.bars.get(bar.index).is_some_and(|b| b.repeat_start);
-        let kind = match (closes, opens) {
-            (Some(t), true) => Barline::RepeatBoth(t),
-            (Some(t), false) => Barline::RepeatEnd(t),
-            (None, true) => Barline::RepeatStart,
-            (None, false) => Barline::Single,
-        };
-        barline(kind, origin.x + bar.x, origin.y, top, &dot_ys, out);
+    for (x, kind) in barlines(doc, spacing) {
+        barline(kind, origin.x + x, origin.y, top, &dot_ys, out);
     }
-    let last = spacing.bars.last().unwrap_or(first);
-    let closing = match doc.bars.get(last.index).and_then(|b| b.repeat_end) {
-        Some(t) => Barline::RepeatEnd(t),
-        None if last.index + 1 >= doc.bars.len() => Barline::Final,
-        None => Barline::Double,
-    };
-    barline(closing, right, origin.y, top, &dot_ys, out);
     // The metre: at the start of the piece, where it changes, and a courtesy
     // signature closing a system whose successor opens with a change.
     // Digits shrink on a short staff (four strings) so the pair never overlaps.
@@ -376,7 +353,6 @@ fn render_bar(
             });
 
             technique(
-                doc,
                 bar,
                 layout,
                 ei,
@@ -400,7 +376,6 @@ fn render_bar(
 /// arrow next to a big fret number grows with it.
 #[allow(clippy::too_many_arguments)]
 fn technique(
-    doc: &Document,
     bar: &Bar,
     layout: &crate::engrave::BarSpacing,
     ei: usize,
@@ -648,7 +623,6 @@ fn technique(
         Technique::Slap => label_above(x, band, "S", color, scale, out),
         Technique::Pop => label_above(x, band, "P", color, scale, out),
     }
-    let _ = doc;
 }
 
 fn label_above(x: f32, band: f32, text: &str, color: crate::Rgb, scale: f32, out: &mut Vec<Prim>) {
@@ -758,9 +732,10 @@ fn spans(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
         }
     }
 
+    // "P.M." is the abbreviation every tab uses, whatever its language.
     for (pick, label, y) in [
-        (0usize, "P.M.", band + sc(5.0)),
-        (1usize, "let ring", band + sc(6.7)),
+        (0usize, "P.M.".to_string(), band + sc(5.0)),
+        (1usize, crate::i18n::t("page.let_ring"), band + sc(6.7)),
     ] {
         let pt = pt_for_cap(sc(1.4));
         let mut run: Option<(f32, f32)> = None;
@@ -772,13 +747,13 @@ fn spans(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>) {
                 (false, Some((s, e))) => {
                     out.push(Prim::Text {
                         pos: P { x: s - sc(1.0), y },
-                        s: label.to_string(),
+                        s: label.clone(),
                         pt,
                         color: FAINT,
                         align: Align::Left,
                     });
                     dashed(
-                        s - sc(1.0) + label_width(label, pt) + sc(0.8),
+                        s - sc(1.0) + label_width(&label, pt) + sc(0.8),
                         e + sc(1.5),
                         y + sc(0.5),
                         FAINT,

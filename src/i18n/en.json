@@ -211,5 +211,7 @@
   "dialog.custom_tuning_title": "Custom tuning",
   "dialog.ok": "OK",
   "page.tuning": "Tuning:",
+  "page.let_ring": "let ring",
+  "page.bend_full": "full",
   "pitch.middle_c_octave": "4"
 }

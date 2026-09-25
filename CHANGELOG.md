@@ -4,6 +4,18 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.2.4] — 2026-09-25
+
+### Modifié
+- En français, la page imprime « laisser sonner » au lieu de « let ring », comme la case de la
+  palette. Le « full » d'un tiré d'un ton passe lui aussi par les fichiers de traduction.
+- La palette range le trille avec les autres ornements, dans le même ordre que l'aide et le menu
+  des styles de notes, qu'elle suit désormais d'office.
+- Factorisation interne sans effet sur la gravure : barres de mesure et reprises résolues une
+  seule fois pour toutes les rangées, largeur de l'en-tête de portée unique, liste des valeurs de
+  note unique, accès à la note sélectionnée mis en commun (environ 200 lignes de moins). Le PDF de
+  chaque document de contrôle est identique à l'octet près.
+
 ## [4.2.3] — 2026-09-25
 
 ### Corrigé

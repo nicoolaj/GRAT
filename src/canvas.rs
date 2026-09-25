@@ -24,6 +24,32 @@ pub struct Sel {
     pub string: u8,
 }
 
+impl Sel {
+    /// The event this cell sits on, while the document still has it.
+    fn event(self, doc: &Document) -> Option<&model::Event> {
+        doc.bars.get(self.bar)?.events.get(self.event)
+    }
+
+    fn event_mut(self, doc: &mut Document) -> Option<&mut model::Event> {
+        doc.bars.get_mut(self.bar)?.events.get_mut(self.event)
+    }
+
+    /// The note this cell holds, if any.
+    fn note(self, doc: &Document) -> Option<&model::Note> {
+        self.event(doc)?
+            .notes
+            .iter()
+            .find(|n| n.string == self.string)
+    }
+
+    fn note_mut(self, doc: &mut Document) -> Option<&mut model::Note> {
+        self.event_mut(doc)?
+            .notes
+            .iter_mut()
+            .find(|n| n.string == self.string)
+    }
+}
+
 /// Everything the editor remembers between frames: view state (zoom), selection,
 /// the armed tool, and the undo stack. Owned by the app, threaded through every
 /// call here.
@@ -173,6 +199,21 @@ pub fn retune(
 fn mutate(state: &mut EditorState, doc: &mut Document, f: impl FnOnce(&mut Document)) {
     snapshot(state, doc);
     f(doc);
+}
+
+/// Push an undo snapshot, then change the event under `sel`: what most editing
+/// keys and palette buttons do.
+fn edit_event(
+    state: &mut EditorState,
+    doc: &mut Document,
+    sel: Sel,
+    f: impl FnOnce(&mut model::Event),
+) {
+    mutate(state, doc, |doc| {
+        if let Some(event) = sel.event_mut(doc) {
+            f(event);
+        }
+    });
 }
 
 /// Swap in another document (New, Open). The selection, the fret being typed
@@ -808,24 +849,13 @@ fn handle_digit(state: &mut EditorState, doc: &mut Document, digit: u32, now: f6
     true
 }
 
-/// `NoteValue` variants ordered longest to shortest, matching both the palette
-/// row and `NoteValue`'s own declaration order.
-const NOTE_VALUES: [NoteValue; 6] = [
-    NoteValue::Whole,
-    NoteValue::Half,
-    NoteValue::Quarter,
-    NoteValue::Eighth,
-    NoteValue::Sixteenth,
-    NoteValue::ThirtySecond,
-];
-
 /// One step shorter (`shorter: true`) or longer than `v`, clamped at both ends:
 /// there is no wraparound, so `-` on a thirty-second note (or `+` on a whole
 /// note) does nothing.
 fn step_value(v: NoteValue, shorter: bool) -> NoteValue {
-    let i = NOTE_VALUES.iter().position(|&x| x == v).unwrap_or(0);
+    let i = NoteValue::ALL.iter().position(|&x| x == v).unwrap_or(0);
     let j = if shorter { i + 1 } else { i.wrapping_sub(1) };
-    NOTE_VALUES.get(j).copied().unwrap_or(v)
+    NoteValue::ALL.get(j).copied().unwrap_or(v)
 }
 
 /// The selected event's current duration, or the default if there's no event
@@ -834,11 +864,7 @@ fn step_value(v: NoteValue, shorter: bool) -> NoteValue {
 /// `state.tool_value`), so pressing `-` or dragging the dot count doesn't
 /// clobber the other half.
 fn selected_dur(doc: &Document, sel: Sel) -> model::Dur {
-    doc.bars
-        .get(sel.bar)
-        .and_then(|b| b.events.get(sel.event))
-        .map(|e| e.dur)
-        .unwrap_or_default()
+    sel.event(doc).map(|e| e.dur).unwrap_or_default()
 }
 
 /// Apply `dur` to the selected event exactly as the value and dot widgets in
@@ -1043,11 +1069,8 @@ pub fn show(
             // for the popup to stay open -- it does its own secondary-click
             // detection, so this runs unconditionally and is a no-op most frames.
             if let Some(sel) = state.selected {
-                let param = doc
-                    .bars
-                    .get(sel.bar)
-                    .and_then(|b| b.events.get(sel.event))
-                    .and_then(|e| e.notes.iter().find(|n| n.string == sel.string))
+                let param = sel
+                    .note(doc)
                     .and_then(|n| n.tech.param().map(|p| (n.tech, p)));
                 if let Some((tech, (v0, range))) = param {
                     let mut v = v0;
@@ -1058,12 +1081,7 @@ pub fn show(
                             snapshot(state, doc);
                         }
                         if dv.changed() {
-                            if let Some(note) = doc
-                                .bars
-                                .get_mut(sel.bar)
-                                .and_then(|b| b.events.get_mut(sel.event))
-                                .and_then(|e| e.notes.iter_mut().find(|n| n.string == sel.string))
-                            {
+                            if let Some(note) = sel.note_mut(doc) {
                                 note.tech = note.tech.with_param(v);
                             }
                             action = Some(Action::Changed);
@@ -1109,14 +1127,8 @@ pub fn show(
                             ..
                         } => {
                             if let Some(sel) = state.selected {
-                                mutate(state, doc, move |doc| {
-                                    if let Some(event) = doc
-                                        .bars
-                                        .get_mut(sel.bar)
-                                        .and_then(|b| b.events.get_mut(sel.event))
-                                    {
-                                        event.notes.retain(|n| n.string != sel.string);
-                                    }
+                                edit_event(state, doc, sel, |e| {
+                                    e.notes.retain(|n| n.string != sel.string)
                                 });
                                 action = Some(Action::Changed);
                             }
@@ -1127,15 +1139,7 @@ pub fn show(
                             ..
                         } => {
                             if let Some(sel) = state.selected {
-                                mutate(state, doc, move |doc| {
-                                    if let Some(event) = doc
-                                        .bars
-                                        .get_mut(sel.bar)
-                                        .and_then(|b| b.events.get_mut(sel.event))
-                                    {
-                                        event.notes.clear();
-                                    }
-                                });
+                                edit_event(state, doc, sel, |e| e.notes.clear());
                                 action = Some(Action::Changed);
                             }
                         }
@@ -1262,15 +1266,8 @@ fn apply_param(
         state.tool_tech = tech.with_param(v);
     }
     if touches_doc {
-        if let Some(sel) = state.selected {
-            if let Some(note) = doc
-                .bars
-                .get_mut(sel.bar)
-                .and_then(|b| b.events.get_mut(sel.event))
-                .and_then(|e| e.notes.iter_mut().find(|n| n.string == sel.string))
-            {
-                note.tech = note.tech.with_param(v);
-            }
+        if let Some(note) = state.selected.and_then(|sel| sel.note_mut(doc)) {
+            note.tech = note.tech.with_param(v);
         }
         *action = Some(Action::Changed);
     }
@@ -1304,15 +1301,10 @@ fn tech_button(
             // carries this same technique (by discriminant) -- otherwise it would
             // silently retag the note. Decided once per frame and reused by both
             // widgets below: only one of them can be interacted with per frame.
-            let touches_doc = state.selected.is_some_and(|sel| {
-                doc.bars
-                    .get(sel.bar)
-                    .and_then(|b| b.events.get(sel.event))
-                    .and_then(|e| e.notes.iter().find(|n| n.string == sel.string))
-                    .is_some_and(|n| {
-                        std::mem::discriminant(&n.tech) == std::mem::discriminant(&tech)
-                    })
-            });
+            let touches_doc = state
+                .selected
+                .and_then(|sel| sel.note(doc))
+                .is_some_and(|n| std::mem::discriminant(&n.tech) == std::mem::discriminant(&tech));
 
             let btn = egui::Frame::new()
                 .fill(color.gamma_multiply(0.18))
@@ -1355,25 +1347,13 @@ fn tech_button(
 
     if resp.clicked() {
         state.tool_tech = tech;
-        if let Some(sel) = state.selected {
-            let had_note = doc
-                .bars
-                .get(sel.bar)
-                .and_then(|b| b.events.get(sel.event))
-                .is_some_and(|e| e.notes.iter().any(|n| n.string == sel.string));
-            if had_note {
-                mutate(state, doc, move |doc| {
-                    if let Some(note) = doc
-                        .bars
-                        .get_mut(sel.bar)
-                        .and_then(|b| b.events.get_mut(sel.event))
-                        .and_then(|e| e.notes.iter_mut().find(|n| n.string == sel.string))
-                    {
-                        note.tech = tech;
-                    }
-                });
-                *action = Some(Action::Changed);
-            }
+        if let Some(sel) = state.selected.filter(|sel| sel.note(doc).is_some()) {
+            mutate(state, doc, |doc| {
+                if let Some(note) = sel.note_mut(doc) {
+                    note.tech = tech;
+                }
+            });
+            *action = Some(Action::Changed);
         }
     }
 }
@@ -1390,16 +1370,14 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     // lives in the Edit menu now, mirrored by the status bar's "INS" light.
     ui.label(t("tool.value"));
     ui.horizontal_wrapped(|ui| {
-        for v in NOTE_VALUES {
+        for v in NoteValue::ALL {
             let armed = state.tool_value.base == v;
             if ui
                 .selectable_label(armed, grat::i18n::value_name(v))
                 .clicked()
             {
                 state.tool_value.base = v;
-                let dots = sel
-                    .and_then(|s| doc.bars.get(s.bar).and_then(|b| b.events.get(s.event)))
-                    .map_or(0, |e| e.dur.dots);
+                let dots = sel.and_then(|s| s.event(doc)).map_or(0, |e| e.dur.dots);
                 if apply_dur(state, doc, model::Dur { base: v, dots }) {
                     action = Some(Action::Changed);
                 }
@@ -1414,7 +1392,7 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         {
             let dots = state.tool_value.dots;
             let base = sel
-                .and_then(|s| doc.bars.get(s.bar).and_then(|b| b.events.get(s.event)))
+                .and_then(|s| s.event(doc))
                 .map_or(NoteValue::default(), |e| e.dur.base);
             if apply_dur(state, doc, model::Dur { base, dots }) {
                 action = Some(Action::Changed);
@@ -1427,127 +1405,17 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         .clicked()
     {
         if let Some(sel) = sel {
-            mutate(state, doc, move |doc| {
-                if let Some(event) = doc
-                    .bars
-                    .get_mut(sel.bar)
-                    .and_then(|b| b.events.get_mut(sel.event))
-                {
-                    event.notes.clear();
-                }
-            });
+            edit_event(state, doc, sel, |e| e.notes.clear());
             action = Some(Action::Changed);
         }
     }
 
     ui.separator();
-    tech_button(ui, state, doc, Technique::Plain, "tech.plain", &mut action);
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::HammerOn,
-        "tech.hammer_on",
-        &mut action,
-    );
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::PullOff,
-        "tech.pull_off",
-        &mut action,
-    );
-    tech_button(ui, state, doc, Technique::Slide, "tech.slide", &mut action);
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::SlideShift,
-        "tech.slide_shift",
-        &mut action,
-    );
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::SlideIn { from_fret: 0 },
-        "tech.slide_in",
-        &mut action,
-    );
-    tech_button(ui, state, doc, Technique::Grace, "tech.grace", &mut action);
-
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::Bend { quarters: 0 },
-        "tech.bend",
-        &mut action,
-    );
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::BendRelease { quarters: 0 },
-        "tech.bend_release",
-        &mut action,
-    );
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::PreBend { quarters: 0 },
-        "tech.pre_bend",
-        &mut action,
-    );
-
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::Vibrato,
-        "tech.vibrato",
-        &mut action,
-    );
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::WideVibrato,
-        "tech.wide_vibrato",
-        &mut action,
-    );
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::Harmonic,
-        "tech.harmonic",
-        &mut action,
-    );
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::PinchHarmonic,
-        "tech.pinch_harmonic",
-        &mut action,
-    );
-    tech_button(ui, state, doc, Technique::Tap, "tech.tap", &mut action);
-    tech_button(ui, state, doc, Technique::Slap, "tech.slap", &mut action);
-    tech_button(ui, state, doc, Technique::Pop, "tech.pop", &mut action);
-    tech_button(ui, state, doc, Technique::Dead, "tech.dead", &mut action);
-    tech_button(ui, state, doc, Technique::Ghost, "tech.ghost", &mut action);
-
-    tech_button(
-        ui,
-        state,
-        doc,
-        Technique::Trill { to_fret: 0 },
-        "tech.trill",
-        &mut action,
-    );
+    // One button per technique, in `TECH_LEGEND`'s order: the Help legend's and
+    // the note-styles menu's, grouped by kind.
+    for &(tech, key, _) in crate::TECH_LEGEND {
+        tech_button(ui, state, doc, tech, key, &mut action);
+    }
 
     ui.separator();
     for (strum, key) in [
@@ -1561,18 +1429,12 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
             .clicked()
         {
             if let Some(sel) = sel {
-                mutate(state, doc, move |doc| {
-                    if let Some(event) = doc
-                        .bars
-                        .get_mut(sel.bar)
-                        .and_then(|b| b.events.get_mut(sel.event))
-                    {
-                        event.strum = if event.strum == Some(strum) {
-                            None
-                        } else {
-                            Some(strum)
-                        };
-                    }
+                edit_event(state, doc, sel, |e| {
+                    e.strum = if e.strum == Some(strum) {
+                        None
+                    } else {
+                        Some(strum)
+                    };
                 });
                 action = Some(Action::Changed);
             }
@@ -1581,7 +1443,7 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
 
     ui.separator();
     let (mut palm_mute, mut let_ring) = sel
-        .and_then(|s| doc.bars.get(s.bar).and_then(|b| b.events.get(s.event)))
+        .and_then(|s| s.event(doc))
         .map(|e| (e.palm_mute, e.let_ring))
         .unwrap_or((false, false));
     if ui
@@ -1592,15 +1454,7 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         .changed()
     {
         if let Some(sel) = sel {
-            mutate(state, doc, move |doc| {
-                if let Some(event) = doc
-                    .bars
-                    .get_mut(sel.bar)
-                    .and_then(|b| b.events.get_mut(sel.event))
-                {
-                    event.palm_mute = palm_mute;
-                }
-            });
+            edit_event(state, doc, sel, |e| e.palm_mute = palm_mute);
             action = Some(Action::Changed);
         }
     }
@@ -1612,15 +1466,7 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
         .changed()
     {
         if let Some(sel) = sel {
-            mutate(state, doc, move |doc| {
-                if let Some(event) = doc
-                    .bars
-                    .get_mut(sel.bar)
-                    .and_then(|b| b.events.get_mut(sel.event))
-                {
-                    event.let_ring = let_ring;
-                }
-            });
+            edit_event(state, doc, sel, |e| e.let_ring = let_ring);
             action = Some(Action::Changed);
         }
     }

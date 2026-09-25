@@ -5,8 +5,14 @@
 //! as one continuous mark down the block. Keeping that geometry here is what makes
 //! the two renderers agree instead of drifting apart.
 
-use crate::model::NoteValue;
+use crate::engrave::Spacing;
+use crate::model::{Document, NoteValue};
 use crate::{Align, Prim, Rgb, P};
+
+/// Room at the left of every system, before its first barline, where each row
+/// draws its own head: "TAB" and the string names, the clef, the time signature
+/// (invariant 3). One value for every row, or their barlines would not line up.
+pub const HEAD_MM: f32 = 13.0;
 
 pub const INK: Rgb = Rgb(0x1D, 0x1D, 0x1F);
 pub const PAPER: Rgb = Rgb(0xFF, 0xFF, 0xFF);
@@ -272,6 +278,41 @@ pub enum Barline {
     RepeatEnd(u8),
     /// A closing repeat immediately followed by an opening one.
     RepeatBoth(u8),
+}
+
+/// Every barline a system draws, as (x from its first barline, kind): the one
+/// opening each bar -- carrying the closing repeat of the bar before together
+/// with its own opening one -- then the system's closing barline. Every row
+/// draws from this, so a repeat reads as one mark down the whole block.
+pub fn barlines(doc: &Document, spacing: &Spacing) -> Vec<(f32, Barline)> {
+    let repeat_end = |i: usize| doc.bars.get(i).and_then(|b| b.repeat_end);
+    let mut out: Vec<(f32, Barline)> = spacing
+        .bars
+        .iter()
+        .enumerate()
+        .map(|(i, bar)| {
+            let closes = i
+                .checked_sub(1)
+                .and_then(|p| repeat_end(spacing.bars[p].index));
+            let opens = doc.bars.get(bar.index).is_some_and(|b| b.repeat_start);
+            let kind = match (closes, opens) {
+                (Some(t), true) => Barline::RepeatBoth(t),
+                (Some(t), false) => Barline::RepeatEnd(t),
+                (None, true) => Barline::RepeatStart,
+                (None, false) => Barline::Single,
+            };
+            (bar.x, kind)
+        })
+        .collect();
+    if let Some(last) = spacing.bars.last() {
+        let closing = match repeat_end(last.index) {
+            Some(t) => Barline::RepeatEnd(t),
+            None if last.index + 1 >= doc.bars.len() => Barline::Final,
+            None => Barline::Double,
+        };
+        out.push((spacing.width, closing));
+    }
+    out
 }
 
 const THIN_W: f32 = 0.22;

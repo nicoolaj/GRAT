@@ -341,17 +341,8 @@ pub fn system_spacing(
 /// Compound metres (6/8, 9/8, 12/8) group by dotted quarter, which is what makes
 /// 6/8 read as two groups of three quavers rather than three groups of two.
 pub fn beat_ticks(time_sig: (u8, u8)) -> u32 {
-    let (num, den) = time_sig;
-    let unit = match den {
-        1 => crate::model::TICKS_WHOLE,
-        2 => crate::model::TICKS_WHOLE / 2,
-        4 => crate::model::TICKS_WHOLE / 4,
-        8 => crate::model::TICKS_WHOLE / 8,
-        16 => crate::model::TICKS_WHOLE / 16,
-        32 => crate::model::TICKS_WHOLE / 32,
-        _ => crate::model::TICKS_WHOLE / 4,
-    };
-    if den >= 8 && num % 3 == 0 && num > 3 {
+    let unit = NoteValue::for_denominator(time_sig.1).ticks();
+    if is_compound(time_sig) {
         unit * 3
     } else {
         unit
@@ -360,17 +351,12 @@ pub fn beat_ticks(time_sig: (u8, u8)) -> u32 {
 
 /// Total ticks a complete bar of this metre holds.
 pub fn bar_ticks(time_sig: (u8, u8)) -> u32 {
-    let (num, den) = time_sig;
-    let unit = match den {
-        1 => crate::model::TICKS_WHOLE,
-        2 => crate::model::TICKS_WHOLE / 2,
-        4 => crate::model::TICKS_WHOLE / 4,
-        8 => crate::model::TICKS_WHOLE / 8,
-        16 => crate::model::TICKS_WHOLE / 16,
-        32 => crate::model::TICKS_WHOLE / 32,
-        _ => crate::model::TICKS_WHOLE / 4,
-    };
-    unit * num as u32
+    NoteValue::for_denominator(time_sig.1).ticks() * time_sig.0 as u32
+}
+
+/// A metre that counts in dotted beats: 6/8, 9/8, 12/8, never 3/8 or 6/4.
+fn is_compound((num, den): (u8, u8)) -> bool {
+    den >= 8 && num % 3 == 0 && num > 3
 }
 
 /// Whether `time_sig` is a simple metre of four beats or more -- wide enough
@@ -380,9 +366,7 @@ pub fn bar_ticks(time_sig: (u8, u8)) -> u32 {
 /// beaming) and `rest_span` (wider rest grouping) -- same threshold, same
 /// reason, applied to two different kinds of run.
 fn has_wide_midpoint(time_sig: (u8, u8)) -> bool {
-    let (num, den) = time_sig;
-    let compound = den >= 8 && num % 3 == 0 && num > 3;
-    !compound && num >= 4
+    !is_compound(time_sig) && time_sig.0 >= 4
 }
 
 /// Onset of every event in the bar, in ticks from the barline.
@@ -508,16 +492,6 @@ pub fn is_complete(bar: &Bar, time_sig: (u8, u8)) -> bool {
     bar.events.iter().map(|e| e.dur.ticks()).sum::<u32>() == bar_ticks(time_sig)
 }
 
-/// Six undotted note values, longest first — the basis `split_ticks` is greedy over.
-const SPLITTABLE: [NoteValue; 6] = [
-    NoteValue::Whole,
-    NoteValue::Half,
-    NoteValue::Quarter,
-    NoteValue::Eighth,
-    NoteValue::Sixteenth,
-    NoteValue::ThirtySecond,
-];
-
 /// Break `ticks` into the fewest printable (undotted) durations, longest first.
 ///
 /// Stops as soon as no value fits what remains, rather than looping forever: a
@@ -531,7 +505,7 @@ const SPLITTABLE: [NoteValue; 6] = [
 pub fn split_ticks(ticks: u32) -> Vec<Dur> {
     let mut out = Vec::new();
     let mut remaining = ticks;
-    while let Some(base) = SPLITTABLE.iter().copied().find(|v| v.ticks() <= remaining) {
+    while let Some(base) = NoteValue::ALL.into_iter().find(|v| v.ticks() <= remaining) {
         remaining -= base.ticks();
         out.push(Dur { base, dots: 0 });
     }
