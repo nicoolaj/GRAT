@@ -50,7 +50,7 @@ Everything else follows from that. If you are tempted to compute geometry in `ca
 | `layout.rs` | line breaking, block stacking, pagination, headers and footers, bar numbers, hit boxes |
 | `decorations.rs` | calendar decorations for the logo (confetti, flags, pumpkins...): the date → `Decoration` table, its shape vocabulary, and `bake`, the pixel rasterizer that stamps one into the dock/taskbar icon's raw RGBA. GUI-free like the rest of the library; its live, on-screen counterpart is `canvas::paint_decoration` |
 | `canvas.rs` | egui painting of `Prim`, mouse editing, tool palette, and the live rendering of a `decorations::Decoration` (`paint_decoration`) |
-| `live.rs` | the live player: transport, the two scrolling views, the highlighter, the metronome (click + flash + count-in), and the piece's own sound (one decaying tone per note, its pitch a piecewise-linear programme so a bend, a slide and a trill glide or alternate instead of sounding flat) crossfaded against the click. A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. Both the click and the note synthesis are macOS/Windows only — see "Verified API facts" |
+| `live.rs` | the live player: transport, the two scrolling views, the highlighter, the metronome (click + flash + count-in), the loop (A/B, bar fields or the editor's selection, tinted on the score, with a speed ramp each time round), and the piece's own sound (one decaying tone per note, its pitch a piecewise-linear programme so a bend, a slide and a trill glide or alternate instead of sounding flat) crossfaded against the click. A module of the binary, like `canvas.rs`, and it paints through `canvas`'s `Prim` painter. Both the click and the note synthesis are macOS/Windows only — see "Verified API facts" |
 | `pdf.rs` | `Prim` → printpdf ops |
 | `main.rs` | window, theme, menus, dialogs, shortcuts, launch splash, `--export` CLI |
 
@@ -88,7 +88,9 @@ never know about pages, egui or PDF.
    grid only counts the right number of bars if it walks that same document too, and the tone list
    only strikes the right pitch at the right moment if it reads ties (`Note::tie_next`) off that
    same document rather than the editor's own.
-   `LiveState::enter` builds all five together for exactly that reason; don't split it up.
+   `Show::build` makes all five from one `score` for exactly that reason, and a loop's own
+   programme (`Program::build` over a range of bars) comes from that same `score`; don't split
+   them up.
    Cues and beats walk `engrave::play_order` of that document -- repeats unrolled, so a repeated
    bar is visited again -- and a cue's `step` (its bar's place in that order) is what tells a
    bar's two passes apart: a tie, a seek and the playhead's glide all go by `step`, not `bar`. A

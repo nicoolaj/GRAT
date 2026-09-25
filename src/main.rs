@@ -604,6 +604,7 @@ impl TablaturesApp {
 
     fn do_new(&mut self) {
         canvas::replace_document(&mut self.editor, &mut self.doc, Document::new_empty());
+        self.live.forget_loop();
         self.path = None;
         self.dirty = false;
         self.layout_dirty = true;
@@ -623,6 +624,7 @@ impl TablaturesApp {
         {
             Some(Ok(doc)) => {
                 canvas::replace_document(&mut self.editor, &mut self.doc, doc);
+                self.live.forget_loop();
                 self.path = Some(path);
                 self.dirty = false;
                 self.layout_dirty = true;
@@ -908,7 +910,8 @@ impl TablaturesApp {
                         .add(egui::Button::new(t("menu.live")).shortcut_text(sc_live))
                         .clicked()
                     {
-                        self.live.enter(&self.doc);
+                        self.live
+                            .enter(&self.doc, canvas::range_bars(&self.editor, &self.doc));
                         ui.close();
                     }
                     ui.separator();
@@ -1224,7 +1227,8 @@ impl eframe::App for TablaturesApp {
             if self.live.open {
                 self.live.exit();
             } else {
-                self.live.enter(&self.doc);
+                self.live
+                    .enter(&self.doc, canvas::range_bars(&self.editor, &self.doc));
             }
         }
 
@@ -1780,6 +1784,38 @@ mod tests {
         let cell = shot.text("5");
         shot.click(cell, egui::PointerButton::Secondary, egui::Modifiers::NONE);
         shot.shoot("right-click");
+
+        // Live mode on eight bars of melody, bars 3 to 5 looped, the playhead in
+        // bar 4: the tint, the A and B edges, the transport's loop line.
+        let mut doc = Document::new_empty();
+        for (k, event) in doc.bars.iter_mut().flat_map(|b| &mut b.events).enumerate() {
+            event.notes.push(grat::model::Note {
+                string: (k % 3) as u8,
+                fret: [3, 5, 7, 8][k % 4],
+                tech: Technique::Plain,
+                tie_next: false,
+            });
+        }
+        let bar = grat::engrave::bar_duration_secs((4, 4), doc.tempo);
+        let mut shot = Shooter::new(doc);
+        shot.app.live.enter(&shot.app.doc, Some((2, 4)));
+        shot.app.live.t = 1.5 * bar;
+        shot.frame(Vec::new());
+        shot.frame(Vec::new());
+        shot.shoot("live-pages");
+        shot.app.live.linear = true;
+        shot.frame(Vec::new());
+        shot.shoot("live-linear");
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        shot.frame(vec![key(egui::Key::A)]);
+        shot.frame(Vec::new());
+        shot.shoot("live-mark-a");
     }
 
     /// One close request, as the window's close button sends it, run through

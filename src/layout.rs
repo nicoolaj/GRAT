@@ -21,6 +21,18 @@ use crate::{Align, Prim, Rgb, MARGIN_MM, P, PAGE_H_MM, PAGE_W_MM};
 pub struct Page {
     pub prims: Vec<Prim>,
     pub hits: Vec<tablature::Hit>,
+    /// Where each bar on the page sits.
+    pub bars: Vec<BarBox>,
+}
+
+/// Where one bar sits: from its opening to its closing barline, across the full
+/// height of its block. What the live player tints to show a loop.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarBox {
+    /// Index into `Document::bars`.
+    pub bar: usize,
+    pub min: P,
+    pub max: P,
 }
 
 // Title block (page 1 only): title, a gap, the author, then a gap before the
@@ -174,6 +186,8 @@ pub struct Strip {
     pub x: f32,
     /// The block occupies y in `[0, height]`.
     pub height: f32,
+    /// Where each bar sits, as on a page.
+    pub bars: Vec<BarBox>,
 }
 
 impl Strip {
@@ -204,7 +218,7 @@ pub fn strip(doc: &Document) -> Strip {
     let spacing = engrave::system_spacing(doc, 0..doc.bars.len(), None);
     let mut prims = Vec::new();
     let mut hits = Vec::new();
-    place_block(
+    let bars = place_block(
         doc,
         &spacing,
         staff::HEAD_MM,
@@ -219,6 +233,7 @@ pub fn strip(doc: &Document) -> Strip {
         spacing,
         x: staff::HEAD_MM,
         height,
+        bars,
     }
 }
 
@@ -283,6 +298,7 @@ fn render_page(
 ) -> Page {
     let mut prims = Vec::new();
     let mut hits = Vec::new();
+    let mut bars = Vec::new();
     let left_x = MARGIN_MM + staff::HEAD_MM;
 
     let mut top = PAGE_H_MM - MARGIN_MM;
@@ -295,12 +311,14 @@ fn render_page(
 
     for (range, target, block_h) in systems {
         let spacing = engrave::system_spacing(doc, range.clone(), Some(*target));
-        place_block(doc, &spacing, left_x, top, false, &mut prims, &mut hits);
+        bars.extend(place_block(
+            doc, &spacing, left_x, top, false, &mut prims, &mut hits,
+        ));
         top -= block_h + BLOCK_GAP_MM;
     }
 
     footer(page_no, total, &mut prims);
-    Page { prims, hits }
+    Page { prims, hits, bars }
 }
 
 /// Draw one line of centred text with `cap_mm` cap height and return the baseline
@@ -405,7 +423,7 @@ fn block_height(doc: &Document, bars: Range<usize>) -> f32 {
 /// column — stacked with no gap between rows: each row's own band/ledger padding
 /// already reads as the gap.
 /// `number_every_bar` numbers each bar, as the live strip wants; a page numbers
-/// only the bar that opens the system.
+/// only the bar that opens the system. Returns where each of its bars sits.
 fn place_block(
     doc: &Document,
     spacing: &Spacing,
@@ -414,7 +432,7 @@ fn place_block(
     number_every_bar: bool,
     out: &mut Vec<Prim>,
     hits: &mut Vec<tablature::Hit>,
-) {
+) -> Vec<BarBox> {
     let half_range = match (spacing.bars.first(), spacing.bars.last()) {
         (Some(first), Some(last)) => notation::half_range(doc, first.index..last.index + 1),
         _ => (0, 8),
@@ -471,6 +489,16 @@ fn place_block(
             align: Align::Center,
         });
     }
+
+    spacing
+        .bars
+        .iter()
+        .map(|b| BarBox {
+            bar: b.index,
+            min: P::new(x + b.x, cursor),
+            max: P::new(x + b.x + b.width, top),
+        })
+        .collect()
 }
 
 /// A thin orange rule under an incomplete bar's tablature staff. Never blocks,

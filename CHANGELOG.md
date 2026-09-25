@@ -4,6 +4,22 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.6.0] — 2026-09-26
+
+### Ajouté
+- Boucle en mode live, pour répéter une section. Trois façons de la choisir :
+  - sélectionner des mesures dans l'éditeur (Maj + clic) avant d'ouvrir le mode live ;
+  - les champs « mesures X à Y » de la barre du lecteur ;
+  - au vol pendant la lecture : A (bouton ou touche) marque la mesure en cours comme début, B
+    marque la fin et lance la boucle. L active ou coupe la boucle.
+- La boucle se voit sans équivoque : ses mesures sont teintées en bleu sous les notes, une barre et
+  un onglet « A » marquent son début, « B » sa fin. Un A posé en attente de B est orange, dans la
+  barre du lecteur comme sur la partition. Le numéro du passage en cours est affiché.
+- La boucle repart en A sans blanc, métronome et notes compris. Elle joue ses mesures tout droit,
+  sans les reprises qu'elles contiennent.
+- Accélération progressive : à chaque passage, la vitesse monte d'un pas choisi (+5 % par
+  défaut) jusqu'à une vitesse cible, pour amener un passage difficile au tempo.
+
 ## [4.5.0] — 2026-09-26
 
 ### Ajouté

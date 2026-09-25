@@ -12,7 +12,8 @@ use crate::{Align, Prim, Rgb, P};
 /// Room at the left of every system, before its first barline, where each row
 /// draws its own head: "TAB" and the string names, the clef, the time signature
 /// (invariant 3). One value for every row, or their barlines would not line up.
-pub const HEAD_MM: f32 = 13.0;
+/// 14 mm is the G clef's three spaces and a millimetre's air before the metre.
+pub const HEAD_MM: f32 = 14.0;
 
 pub const INK: Rgb = Rgb(0x1D, 0x1D, 0x1F);
 pub const PAPER: Rgb = Rgb(0xFF, 0xFF, 0xFF);

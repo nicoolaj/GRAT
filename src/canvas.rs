@@ -1383,6 +1383,13 @@ fn selected_bars(state: &EditorState, doc: &Document) -> Option<(usize, usize)> 
     (last < doc.bars.len()).then_some((first, last))
 }
 
+/// The bars a range selection (Shift + click) covers, which the live player
+/// loops; `None` for a lone cell.
+pub fn range_bars(state: &EditorState, doc: &Document) -> Option<(usize, usize)> {
+    state.range_anchor?;
+    selected_bars(state, doc)
+}
+
 /// Repeat the selected bars: an opening repeat on the first, a closing one on
 /// the last -- or, where they carry exactly that already, take both off.
 pub fn repeat_selection(state: &mut EditorState, doc: &mut Document) -> bool {

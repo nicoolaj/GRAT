@@ -11,7 +11,7 @@
 
 use eframe::egui;
 use grat::engrave::{Beat, Cue};
-use grat::layout::{Page, Strip};
+use grat::layout::{BarBox, Page, Strip};
 use grat::model::{self, Document};
 use grat::tablature::Hit;
 use grat::{engrave, i18n::t, layout, P, PAGE_H_MM, PAGE_W_MM};
@@ -31,6 +31,12 @@ const PLAYHEAD: egui::Color32 = egui::Color32::from_rgb(0x5E, 0x5C, 0xE6);
 const FLASH_DOWNBEAT: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x3B, 0x30);
 const FLASH_PINK: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x2D, 0x55);
 const FLASH_YELLOW: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xD8, 0x2A);
+/// The loop: its edges, its A and B tabs, and (faint) the bars it covers.
+const LOOP: egui::Color32 = egui::Color32::from_rgb(0x0A, 0x84, 0xFF);
+const LOOP_TINT: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x02, 0x1A, 0x33, 0x33);
+/// An A marked and waiting for B: a colour of its own, so it never reads as the
+/// start of the loop still playing.
+const LOOP_PENDING: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x95, 0x00);
 /// Radius of the flash dot, screen pixels -- independent of `zoom`: it is a HUD
 /// element over the score, not part of it.
 const FLASH_RADIUS: f32 = 24.0;
@@ -242,6 +248,20 @@ pub struct LiveState {
     count_in: Option<CountIn>,
     /// The most recent beat that fired, for the flash dot.
     flash: Option<Flash>,
+    /// The looped bars, first and last, as indices into the score. Kept while
+    /// the loop is switched off, and from one entry to the next, until set again.
+    pub loop_bars: Option<(usize, usize)>,
+    /// Whether playback goes round `loop_bars` rather than through the piece.
+    pub loop_on: bool,
+    /// A bar marked A, waiting for B to close the loop.
+    mark_a: Option<usize>,
+    /// Times round the loop since it was last set.
+    passes: u32,
+    /// Speed up each time round the loop, by `ramp_step` of the tempo, until
+    /// `speed` reaches `ramp_target`: how a hard passage is brought up to tempo.
+    pub ramp: bool,
+    pub ramp_step: f32,
+    pub ramp_target: f32,
     audio: Option<Audio>,
     show: Option<Show>,
 }
@@ -299,24 +319,65 @@ struct CountIn {
 /// From `engrave::for_export(doc)`, not from the document the editor holds: that
 /// is what drops the blank bars the editor keeps ready under the music — silence
 /// the player would otherwise sit through — and writes its per-beat rests the way
-/// a score writes them. It renumbers events, so the cues, the tones, the strip and
-/// the pages must all come from that one normalised document; building them
-/// together here is what guarantees they agree.
+/// a score writes them. It renumbers events, so the programmes, the strip and the
+/// pages must all come from that one normalised document, `score`; building them
+/// from it alone is what guarantees they agree.
 struct Show {
     /// The document as the editor holds it, kept only to notice that it has been
     /// replaced underneath the player.
     source: Document,
+    score: Document,
+    /// The piece as played: repeats unrolled.
+    piece: Program,
+    /// The looped bars, played straight through, while a loop is on.
+    looped: Option<Program>,
+    strip: Strip,
+    pages: Vec<Page>,
+}
+
+impl Show {
+    fn build(doc: &Document) -> Show {
+        let score = engrave::for_export(doc);
+        Show {
+            source: doc.clone(),
+            piece: Program::build(&score, &engrave::play_order(&score)),
+            looped: None,
+            strip: layout::strip(&score),
+            pages: layout::paginate(&score),
+            score,
+        }
+    }
+
+    /// What is playing: the loop while one is on, the piece otherwise.
+    fn program(&self) -> &Program {
+        self.looped.as_ref().unwrap_or(&self.piece)
+    }
+}
+
+/// One run of bars, timed from zero: every event, every metronome beat, every
+/// note it sounds.
+struct Program {
     cues: Vec<Cue>,
     /// The metronome's own grid, independent of `cues`: a bar's rests click too.
     beats: Vec<Beat>,
     /// Every note the piece itself sounds, mixed against `beats` by the fader.
     tones: Vec<Tone>,
-    strip: Strip,
-    pages: Vec<Page>,
     /// Seconds of music.
     duration: f32,
-    tempo: u16,
-    bars: usize,
+}
+
+impl Program {
+    /// The bars of `score` in `order`: `engrave::play_order` for the piece, a
+    /// plain range for a loop.
+    fn build(score: &Document, order: &[usize]) -> Program {
+        let cues = engrave::timeline(score, order);
+        Program {
+            beats: engrave::metronome_beats(score, order),
+            tones: tones(score, &cues),
+            duration: cues.last().map_or(0.0, |c| c.end),
+            cues,
+        }
+    }
 }
 
 /// One note to sound: when, along what pitch programme, for how long, how
@@ -596,6 +657,13 @@ impl Default for LiveState {
             count_in_bars: 2,
             count_in: None,
             flash: None,
+            loop_bars: None,
+            loop_on: false,
+            mark_a: None,
+            passes: 0,
+            ramp: false,
+            ramp_step: 0.05,
+            ramp_target: 1.0,
             audio: None,
             show: None,
         }
@@ -603,30 +671,36 @@ impl Default for LiveState {
 }
 
 impl LiveState {
-    /// Take the window over, with `doc` frozen as it is now.
-    pub fn enter(&mut self, doc: &Document) {
-        let source = doc.clone();
-        let doc = engrave::for_export(doc);
-        let order = engrave::play_order(&doc);
-        let cues = engrave::timeline(&doc, &order);
-        let tones = tones(&doc, &cues);
+    /// Take the window over, with `doc` frozen as it is now. `selection`, the
+    /// bars selected in the editor, becomes the loop.
+    pub fn enter(&mut self, doc: &Document, selection: Option<(usize, usize)>) {
         self.open = true;
+        self.audio = Audio::open();
+        self.freeze(doc, selection);
+    }
+
+    /// Freeze `doc` as the score, back at its start -- the loop's, while one is
+    /// on -- with the loop set from `selection` when there is one.
+    fn freeze(&mut self, doc: &Document, selection: Option<(usize, usize)>) {
         self.playing = false;
         self.t = 0.0;
         self.count_in = None;
         self.flash = None;
-        self.audio = Audio::open();
-        self.show = Some(Show {
-            beats: engrave::metronome_beats(&doc, &order),
-            duration: cues.last().map(|c| c.end).unwrap_or(0.0),
-            tempo: doc.tempo,
-            bars: doc.bars.len(),
-            cues,
-            tones,
-            strip: layout::strip(&doc),
-            pages: layout::paginate(&doc),
-            source,
-        });
+        self.mark_a = None;
+        if selection.is_some() {
+            self.loop_bars = selection;
+            self.loop_on = true;
+        }
+        let mut show = Show::build(doc);
+        set_loop(self, &mut show);
+        self.show = Some(show);
+    }
+
+    /// A new piece in the editor: the loop belonged to the old one.
+    pub fn forget_loop(&mut self) {
+        self.loop_bars = None;
+        self.loop_on = false;
+        self.mark_a = None;
     }
 
     /// Hand the window back to the editor. The speed, size and view the player
@@ -687,6 +761,102 @@ fn start_count_in(bars: u32, sig: (u8, u8), tempo: u16) -> CountIn {
     }
 }
 
+/// The bar under the playhead.
+fn current_bar(state: &LiveState, show: &Show) -> usize {
+    let prog = show.program();
+    prog.cues
+        .get(cue_index(&prog.cues, state.t))
+        .map_or(0, |c| c.bar)
+}
+
+/// Point playback at the loop as it is now set -- build the looped programme,
+/// or drop it -- and carry the playhead across onto the same event where the
+/// new programme plays it, else to the new programme's start.
+fn set_loop(state: &mut LiveState, show: &mut Show) {
+    let prog = show.program();
+    let at = prog
+        .cues
+        .get(cue_index(&prog.cues, state.t))
+        .map(|c| (c.bar, c.event, state.t - c.start));
+    let last = show.score.bars.len().saturating_sub(1);
+    show.looped = match state.loop_bars {
+        Some((a, b)) if state.loop_on && !show.score.bars.is_empty() => {
+            let order: Vec<usize> = (a.min(last)..=b.min(last)).collect();
+            Some(Program::build(&show.score, &order))
+        }
+        _ => None,
+    };
+    let prog = show.program();
+    state.t = at
+        .and_then(|(bar, event, into)| {
+            prog.cues
+                .iter()
+                .find(|c| c.bar == bar && c.event == event)
+                .map(|c| c.start + into)
+        })
+        .unwrap_or(0.0);
+    state.passes = 0;
+}
+
+/// Switch the loop on or off; on with none set, it loops the bar playing now.
+fn toggle_loop(state: &mut LiveState, show: &mut Show) {
+    state.loop_on = !state.loop_on;
+    if state.loop_bars.is_none() {
+        let bar = current_bar(state, show);
+        state.loop_bars = Some((bar, bar));
+    }
+    set_loop(state, show);
+}
+
+/// A: the loop will start at the bar playing now, once B closes it.
+fn mark_a(state: &mut LiveState, show: &Show) {
+    state.mark_a = Some(current_bar(state, show));
+}
+
+/// B: the loop ends at the bar playing now, back to A -- or, with no A marked,
+/// to the loop's own first bar, else this bar alone -- and goes on.
+fn mark_b(state: &mut LiveState, show: &mut Show) {
+    let b = current_bar(state, show);
+    let a = state
+        .mark_a
+        .take()
+        .or(state.loop_bars.map(|(a, _)| a))
+        .unwrap_or(b);
+    state.loop_bars = Some((a.min(b), a.max(b)));
+    state.loop_on = true;
+    set_loop(state, show);
+}
+
+/// Move the playhead `dt` seconds of music on -- round the loop when one is on,
+/// straight on from its first bar with no gap, a little faster each time when
+/// the ramp is on -- and return what it crossed: the metronome's beats, the
+/// piece's notes.
+fn advance<'a>(state: &mut LiveState, show: &'a Show, dt: f32) -> (Vec<Beat>, Vec<&'a Tone>) {
+    let prog = show.program();
+    let (mut beats, mut tones) = (Vec::new(), Vec::new());
+    let (mut from, mut to) = (state.t, state.t + dt);
+    loop {
+        let end = to.min(prog.duration);
+        beats.extend_from_slice(crossed(&prog.beats, |b| b.time, from, end));
+        tones.extend(crossed(&prog.tones, |x| x.time, from, end));
+        if to < prog.duration {
+            state.t = to;
+            break;
+        }
+        if show.looped.is_none() || prog.duration <= 0.0 {
+            state.t = prog.duration;
+            state.playing = false;
+            break;
+        }
+        (from, to) = (0.0, to - prog.duration);
+        state.passes += 1;
+        if state.ramp && state.speed < state.ramp_target {
+            state.speed = (state.speed + state.ramp_step).min(state.ramp_target);
+        }
+    }
+    (beats, tones)
+}
+
 /// Play/Pause: pausing never loses a count-in in progress (it simply stops
 /// advancing, like the piece itself does), but starting fresh from a stop arms
 /// one if `count_in_bars` calls for it, timed at the metre of the bar `t` is
@@ -697,12 +867,11 @@ fn toggle_play(state: &mut LiveState, show: &Show) {
         return;
     }
     if state.count_in.is_none() && state.count_in_bars > 0 {
-        let bar = show
-            .cues
-            .get(cue_index(&show.cues, state.t))
-            .map_or(0, |c| c.bar);
-        let sig = show.source.time_sig_at(bar);
-        state.count_in = Some(start_count_in(state.count_in_bars, sig, show.tempo));
+        let bar = current_bar(state, show);
+        let sig = show
+            .score
+            .time_sig_at(bar.min(show.score.bars.len().saturating_sub(1)));
+        state.count_in = Some(start_count_in(state.count_in_bars, sig, show.score.tempo));
     }
     state.playing = true;
 }
@@ -710,16 +879,17 @@ fn toggle_play(state: &mut LiveState, show: &Show) {
 /// Move the playhead one bar back or forward in the order played -- through a
 /// repeat, not across it -- to that bar's first event.
 fn seek_bar(state: &mut LiveState, show: &Show, delta: i32) {
-    let step = show
+    let prog = show.program();
+    let step = prog
         .cues
-        .get(cue_index(&show.cues, state.t))
+        .get(cue_index(&prog.cues, state.t))
         .map_or(0, |c| c.step);
     let target = (step as i64 + i64::from(delta)).max(0) as usize;
-    state.t = show
+    state.t = prog
         .cues
         .iter()
         .find(|c| c.step >= target)
-        .map_or(show.duration, |c| c.start);
+        .map_or(prog.duration, |c| c.start);
 }
 
 /// `m:ss`, for the position readout.
@@ -797,13 +967,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
     // Open, or by an undo -- and when it is, freeze the new one rather than play
     // music that is no longer in the document.
     if state.show.as_ref().is_some_and(|s| s.source != *doc) {
-        state.enter(doc);
+        state.freeze(doc, None);
     }
 
     // Taken out of the state for the frame, so the drawing code can borrow the
     // frozen score while the transport writes to the rest. Put back on the one
     // exit path at the bottom — which is why nothing in between returns early.
-    let Some(show) = state.show.take() else {
+    let Some(mut show) = state.show.take() else {
         state.open = false;
         return;
     };
@@ -822,39 +992,36 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
         if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
             seek_bar(state, &show, 1);
         }
+        if i.consume_key(egui::Modifiers::NONE, egui::Key::A) {
+            mark_a(state, &show);
+        }
+        if i.consume_key(egui::Modifiers::NONE, egui::Key::B) {
+            mark_b(state, &mut show);
+        }
+        if i.consume_key(egui::Modifiers::NONE, egui::Key::L) {
+            toggle_loop(state, &mut show);
+        }
     });
 
     if state.playing {
         let dt = ui.input(|i| i.stable_dt).min(MAX_FRAME_SECS) * state.speed;
         let now = ui.input(|i| i.time);
-        let prev_t = state.t;
 
         // The count-in and the piece share one clock each, but never both at
         // once: while a count-in holds, it alone advances and `t` sits still at
-        // the point playback will resume from.
-        let (fired, phase_done) = match &mut state.count_in {
-            Some(ci) => {
-                let prev = ci.t;
-                ci.t += dt;
-                let hits: Vec<Beat> = crossed(&ci.beats, |b| b.time, prev, ci.t).to_vec();
-                (hits, ci.t >= ci.duration)
-            }
-            None => {
-                let prev = state.t;
-                state.t += dt;
-                let hits: Vec<Beat> = crossed(&show.beats, |b| b.time, prev, state.t).to_vec();
-                (hits, state.t >= show.duration)
-            }
-        };
-
-        if phase_done {
-            if state.count_in.is_some() {
+        // the point playback will resume from. A count-in is silent by
+        // definition, so the piece only ever sounds on its own clock.
+        let (fired, sounded) = if let Some(ci) = state.count_in.as_mut() {
+            let prev = ci.t;
+            ci.t += dt;
+            let hits = crossed(&ci.beats, |b| b.time, prev, ci.t).to_vec();
+            if ci.t >= ci.duration {
                 state.count_in = None;
-            } else {
-                state.t = show.duration;
-                state.playing = false;
             }
-        }
+            (hits, Vec::new())
+        } else {
+            advance(state, &show, dt)
+        };
 
         let (met_gain, piece_gain) = fader(state.mix);
 
@@ -871,11 +1038,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
             }
         }
 
-        // A count-in is silent by definition and `t` does not move under one, so
-        // the piece only ever sounds on its own clock.
-        if piece_gain > 0.0 && state.count_in.is_none() {
+        if piece_gain > 0.0 {
             if let Some(audio) = &state.audio {
-                for tone in crossed(&show.tones, |x| x.time, prev_t, state.t) {
+                for tone in sounded {
                     audio.note(&tone.pitch, tone.secs / state.speed, tone.gain * piece_gain);
                 }
             }
@@ -918,7 +1083,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
             );
             ui.weak(format!(
                 "{:.0} {}",
-                show.tempo as f32 * state.speed,
+                show.score.tempo as f32 * state.speed,
                 t("live.bpm")
             ));
             ui.separator();
@@ -943,6 +1108,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
                 leave = true;
             }
         });
+        ui.horizontal(|ui| loop_controls(ui, state, &mut show));
         ui.add_space(4.0);
     });
 
@@ -969,20 +1135,19 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
                     );
                 }
                 None => {
-                    let bar = show
-                        .cues
-                        .get(cue_index(&show.cues, state.t))
-                        .map_or(0, |c| c.bar + 1);
-                    ui.label(format!("{} {} / {}", t("status.bar"), bar, show.bars));
+                    let bar = current_bar(state, &show) + 1;
+                    let bars = show.score.bars.len();
+                    ui.label(format!("{} {} / {}", t("status.bar"), bar, bars));
                 }
             }
             ui.separator();
-            ui.label(format!("{} / {}", clock(state.t), clock(show.duration)));
+            let duration = show.program().duration;
+            ui.label(format!("{} / {}", clock(state.t), clock(duration)));
             ui.separator();
             let width = ui.available_width().max(80.0);
             ui.add_sized(
                 [width, ui.spacing().interact_size.y],
-                egui::Slider::new(&mut state.t, 0.0..=show.duration.max(0.1)).show_value(false),
+                egui::Slider::new(&mut state.t, 0.0..=duration.max(0.1)).show_value(false),
             );
         });
     });
@@ -998,7 +1163,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
             let rect = ui.available_rect_before_wrap();
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
-            let i = cue_index(&show.cues, state.t);
+            let i = cue_index(&show.program().cues, state.t);
             if state.linear {
                 draw_linear(ui.ctx(), &painter, rect, state, &show, i);
             } else {
@@ -1013,20 +1178,152 @@ pub fn show(ui: &mut egui::Ui, state: &mut LiveState, doc: &Document) {
     }
 }
 
+/// The transport's second line: the loop -- on or off, its bars, A and B to mark
+/// them while playing, what is going on -- and the speed ramp.
+fn loop_controls(ui: &mut egui::Ui, state: &mut LiveState, show: &mut Show) {
+    let mut on = state.loop_on;
+    if ui
+        .checkbox(&mut on, t("live.loop"))
+        .on_hover_text(t("live.loop_tip"))
+        .changed()
+    {
+        toggle_loop(state, show);
+    }
+    let bars = show.score.bars.len().max(1);
+    let (mut a, mut b) = state.loop_bars.map_or((1, 1), |(a, b)| (a + 1, b + 1));
+    ui.label(t("live.loop_bars"));
+    let first = ui.add(egui::DragValue::new(&mut a).range(1..=bars));
+    ui.label(t("live.loop_to"));
+    let last = ui.add(egui::DragValue::new(&mut b).range(1..=bars));
+    if first.changed() || last.changed() {
+        state.loop_bars = Some((a.min(b) - 1, a.max(b) - 1));
+        state.loop_on = true;
+        set_loop(state, show);
+    }
+    if ui.button("A").on_hover_text(t("live.mark_a")).clicked() {
+        mark_a(state, show);
+    }
+    if ui.button("B").on_hover_text(t("live.mark_b")).clicked() {
+        mark_b(state, show);
+    }
+    match state.mark_a {
+        Some(a) => {
+            ui.colored_label(
+                LOOP_PENDING,
+                format!("A : {} {} — {}", t("status.bar"), a + 1, t("live.press_b")),
+            );
+        }
+        None if show.looped.is_some() => {
+            ui.label(format!("{} {}", t("live.pass"), state.passes + 1));
+        }
+        None => {}
+    }
+    ui.separator();
+    ui.checkbox(&mut state.ramp, t("live.ramp"))
+        .on_hover_text(t("live.ramp_tip"));
+    let mut step = (state.ramp_step * 100.0).round() as u32;
+    let mut target = (state.ramp_target * 100.0).round() as u32;
+    ui.add_enabled_ui(state.ramp, |ui| {
+        if ui
+            .add(
+                egui::DragValue::new(&mut step)
+                    .range(1..=25)
+                    .prefix("+")
+                    .suffix(" %"),
+            )
+            .changed()
+        {
+            state.ramp_step = step as f32 / 100.0;
+        }
+        ui.label(t("live.ramp_to"));
+        let (lo, hi) = (*SPEED_RANGE.start(), *SPEED_RANGE.end());
+        let range = (lo * 100.0) as u32..=(hi * 100.0) as u32;
+        if ui
+            .add(egui::DragValue::new(&mut target).range(range).suffix(" %"))
+            .changed()
+        {
+            state.ramp_target = target as f32 / 100.0;
+        }
+    });
+}
+
+/// The loop made plain on the score, under the ink: its bars tinted. `frame`
+/// is the page (or virtual page) the boxes' millimetres are relative to.
+fn loop_tint(
+    painter: &egui::Painter,
+    frame: egui::Rect,
+    zoom: f32,
+    boxes: &[BarBox],
+    lp: (usize, usize),
+) {
+    for bx in boxes.iter().filter(|b| (lp.0..=lp.1).contains(&b.bar)) {
+        painter.rect_filled(bar_rect(frame, zoom, bx), 0.0, LOOP_TINT);
+    }
+}
+
+/// Over the ink: a bold edge with an "A" tab where the loop starts and a "B"
+/// tab where it ends, and, while B is awaited, the new "A" in its own colour.
+fn loop_edges(
+    painter: &egui::Painter,
+    frame: egui::Rect,
+    zoom: f32,
+    boxes: &[BarBox],
+    lp: Option<(usize, usize)>,
+    mark_a: Option<usize>,
+) {
+    let edge = |r: egui::Rect, x: f32, label: &str, colour: egui::Color32| {
+        painter.line_segment(
+            [egui::pos2(x, r.top()), egui::pos2(x, r.bottom())],
+            egui::Stroke::new(3.0, colour),
+        );
+        let tab =
+            egui::Rect::from_center_size(egui::pos2(x, r.top() - 12.0), egui::vec2(22.0, 22.0));
+        painter.rect_filled(tab, 5.0, colour);
+        painter.text(
+            tab.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(15.0),
+            egui::Color32::WHITE,
+        );
+    };
+    for bx in boxes {
+        let r = bar_rect(frame, zoom, bx);
+        if lp.is_some_and(|(a, _)| a == bx.bar) {
+            edge(r, r.left(), "A", LOOP);
+        }
+        if lp.is_some_and(|(_, b)| b == bx.bar) {
+            edge(r, r.right(), "B", LOOP);
+        }
+        // Drawn last: over the loop's own A when both fall on one barline.
+        if mark_a == Some(bx.bar) {
+            edge(r, r.left(), "A", LOOP_PENDING);
+        }
+    }
+}
+
+/// A bar's box on screen, a little taller than the block, like the marker.
+fn bar_rect(frame: egui::Rect, zoom: f32, bx: &BarBox) -> egui::Rect {
+    egui::Rect::from_two_pos(
+        to_screen(frame, zoom, P::new(bx.min.x, bx.max.y + MARKER_PAD_MM)),
+        to_screen(frame, zoom, P::new(bx.max.x, bx.min.y - MARKER_PAD_MM)),
+    )
+}
+
 /// Where the playhead sits on the strip at `t`, in strip millimetres: the current
 /// event's column, glided towards the next one so the ribbon moves continuously
 /// instead of hopping from note to note.
 fn head_x(show: &Show, t: f32) -> f32 {
     let strip = &show.strip;
-    let Some(cue) = show.cues.get(cue_index(&show.cues, t)) else {
+    let cues = &show.program().cues;
+    let Some(cue) = cues.get(cue_index(cues, t)) else {
         return strip.x;
     };
     let x0 = strip.event_x(cue.bar, cue.event).unwrap_or(strip.x);
     // Forward only: where the next event lies back up the line -- a repeat
     // going round again -- glide on to this bar's closing barline, and jump.
-    let x1 = show
-        .cues
-        .get(cue_index(&show.cues, t) + 1)
+    let x1 = cues
+        .get(cue_index(cues, t) + 1)
         .and_then(|n| strip.event_x(n.bar, n.event))
         .filter(|&x| x > x0)
         .or_else(|| strip.bar_span(cue.bar).map(|(_, end)| end))
@@ -1070,7 +1367,12 @@ fn draw_linear(
         egui::Color32::WHITE,
     );
 
+    let lp = show.looped.is_some().then_some(state.loop_bars).flatten();
+    if let Some(lp) = lp {
+        loop_tint(painter, frame, zoom, &strip.bars, lp);
+    }
     if let Some((lo, hi)) = show
+        .program()
         .cues
         .get(i)
         .and_then(|c| column(&strip.hits, c.bar, c.event))
@@ -1088,6 +1390,7 @@ fn draw_linear(
     }) {
         draw_prim(ctx, painter, frame, zoom, prim);
     }
+    loop_edges(painter, frame, zoom, &strip.bars, lp, state.mark_a);
     painter.line_segment(
         [egui::pos2(centre.x, top), egui::pos2(centre.x, bottom)],
         egui::Stroke::new(1.5, PLAYHEAD.gamma_multiply(0.6)),
@@ -1099,12 +1402,12 @@ fn draw_linear(
 /// along the same system, snapped otherwise — a line break, or a repeat going
 /// round again, is a jump, not a slide.
 fn page_focus(show: &Show, i: usize, t: f32) -> Option<(usize, egui::Vec2, P, P)> {
-    let cue = show.cues.get(i)?;
+    let cues = &show.program().cues;
+    let cue = cues.get(i)?;
     let (page, (lo, hi)) = find_column(&show.pages, cue.bar, cue.event)?;
     let mid = |lo: P, hi: P| egui::vec2((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5);
     let here = mid(lo, hi);
-    let next = show
-        .cues
+    let next = cues
         .get(i + 1)
         .and_then(|n| find_column(&show.pages, n.bar, n.event))
         .filter(|&(p, (l, h))| {
@@ -1152,12 +1455,19 @@ fn draw_pages(
             painter.rect_filled(prect, 2.0, egui::Color32::WHITE);
         }
     }
+    let lp = show.looped.is_some().then_some(state.loop_bars).flatten();
+    for (idx, p) in show.pages.iter().enumerate() {
+        if let (Some(prect), Some(lp)) = (visible(idx), lp) {
+            loop_tint(painter, prect, zoom, &p.bars, lp);
+        }
+    }
     marker(painter, page_rect(content_min, page, zoom), zoom, lo, hi);
     for (idx, p) in show.pages.iter().enumerate() {
         let Some(prect) = visible(idx) else { continue };
         for prim in &p.prims {
             draw_prim(ctx, painter, prect, zoom, prim);
         }
+        loop_edges(painter, prect, zoom, &p.bars, lp, state.mark_a);
     }
 }
 
@@ -1203,6 +1513,105 @@ mod tests {
         // Green rises monotonically pink -> yellow; a strict, simple proxy for
         // "the ramp moves the right way and doesn't double back".
         assert!(colors[0].g() < colors[1].g() && colors[1].g() < colors[2].g());
+    }
+
+    /// Four 4/4 bars of quarter notes, as the player freezes them, and the
+    /// length of one bar in seconds.
+    fn four_bars() -> (LiveState, Show, f32) {
+        let mut doc = Document::new_empty();
+        doc.bars.truncate(4);
+        for event in doc.bars.iter_mut().flat_map(|b| &mut b.events) {
+            event.notes.push(model::Note {
+                string: 0,
+                fret: 3,
+                tech: model::Technique::Plain,
+                tie_next: false,
+            });
+        }
+        let bar = engrave::bar_duration_secs((4, 4), doc.tempo);
+        (LiveState::default(), Show::build(&doc), bar)
+    }
+
+    #[test]
+    fn a_loop_goes_round_without_a_gap_and_counts_its_times_round() {
+        let (mut state, mut show, bar) = four_bars();
+        state.loop_bars = Some((1, 2));
+        state.loop_on = true;
+        set_loop(&mut state, &mut show);
+        assert!(show.program().cues.iter().all(|c| c.bar == 1 || c.bar == 2));
+        assert!((show.program().duration - 2.0 * bar).abs() < 1e-4);
+        assert_eq!(state.t, 0.0, "from the loop's first bar");
+
+        state.playing = true;
+        let (beats, tones) = advance(&mut state, &show, 2.5 * bar);
+        assert_eq!(beats.len(), 10, "eight beats round, two past the join");
+        assert_eq!(beats.iter().filter(|b| b.downbeat).count(), 3);
+        assert_eq!(tones.len(), 10, "every note, the join's too");
+        assert!((state.t - 0.5 * bar).abs() < 1e-3, "{}", state.t);
+        assert_eq!(state.passes, 1);
+        assert!(state.playing);
+    }
+
+    #[test]
+    fn the_ramp_speeds_up_each_time_round_to_its_target() {
+        let (mut state, mut show, _) = four_bars();
+        state.loop_bars = Some((0, 0));
+        state.loop_on = true;
+        set_loop(&mut state, &mut show);
+        (state.ramp, state.speed, state.ramp_step, state.ramp_target) = (true, 0.5, 0.1, 0.65);
+        for want in [0.6, 0.65, 0.65] {
+            advance(&mut state, &show, show.program().duration);
+            assert!(
+                (state.speed - want).abs() < 1e-5,
+                "{} vs {want}",
+                state.speed
+            );
+        }
+    }
+
+    #[test]
+    fn a_then_b_loops_the_bars_between_where_the_music_is() {
+        let (mut state, mut show, bar) = four_bars();
+        state.t = 1.25 * bar;
+        mark_a(&mut state, &show);
+        assert!(show.looped.is_none(), "A alone loops nothing yet");
+        state.t = 3.5 * bar;
+        mark_b(&mut state, &mut show);
+        assert_eq!((state.loop_bars, state.loop_on), (Some((1, 3)), true));
+        assert!((state.t - 2.5 * bar).abs() < 1e-3, "same beat, in the loop");
+
+        toggle_loop(&mut state, &mut show);
+        assert!(show.looped.is_none());
+        assert!(
+            (state.t - 3.5 * bar).abs() < 1e-3,
+            "and back onto the piece"
+        );
+    }
+
+    #[test]
+    fn bars_selected_in_the_editor_become_the_loop() {
+        let (mut state, _, bar) = four_bars();
+        let mut doc = Document::new_empty();
+        doc.bars.truncate(4);
+        doc.bars[3].events[0].notes = vec![model::Note {
+            string: 0,
+            fret: 3,
+            tech: model::Technique::Plain,
+            tie_next: false,
+        }];
+        state.freeze(&doc, Some((2, 3)));
+        let show = state.show.as_ref().unwrap();
+        assert!((show.program().duration - 2.0 * bar).abs() < 1e-4);
+        assert!(state.loop_on);
+    }
+
+    #[test]
+    fn without_a_loop_playback_stops_at_the_end() {
+        let (mut state, show, _) = four_bars();
+        state.playing = true;
+        advance(&mut state, &show, 10.0 * show.program().duration);
+        assert!(!state.playing);
+        assert_eq!(state.t, show.program().duration);
     }
 
     #[test]

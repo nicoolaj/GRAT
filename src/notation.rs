@@ -160,7 +160,7 @@ pub fn render(doc: &Document, spacing: &Spacing, origin: P, out: &mut Vec<Prim>)
     if clef(doc.instrument) == Clef::Bass8 {
         f_clef(origin.x - HEAD_MM + 1.3, origin.y, sp, out);
     } else {
-        g_clef(origin.x - HEAD_MM + 3.6, origin.y, sp, out);
+        g_clef(origin.x - HEAD_MM + 4.4, origin.y, sp, out);
     }
 
     // Barlines, and the time signature. A repeat mark between two bars carries the
@@ -794,87 +794,93 @@ fn ties(
     }
 }
 
-/// A treble clef, traced as one continuous stroke: the spiral, the thick upstroke,
-/// the apex loop, the thin stem, the hook. `cx` is the bowl's centre, which sits on
-/// the G line; everything is in staff spaces from that point, y up, with the stroke
-/// width carried along so the ink swells on the rising curves and thins on the stem
-/// the way an engraved clef does.
+/// A treble clef after the golden-ratio construction: the stroke's midline is
+/// nothing but circular arcs of radius φ^k spaces, each tangent to the last — a
+/// turtle walk, the way the Twitter bird is drawn — starting from the eye of the
+/// spiral, which sits on the G line at `cx`. The ink swells and thins by a
+/// smoothstep of the width from one joint to the next, and both edges are the
+/// exact offsets of each arc, so what is filled is the true outline rather than
+/// a sampled stroke. The loop tops out a space and a third over the staff — the
+/// reason the row reserves 14 mm above its baseline.
 ///
-/// The spiral is geometric: one and a half clockwise turns from a dot on the G
-/// line, its radius `r = R0 + (R - R0)·u` opening evenly in the fraction `u` of the
-/// way round, so the inner turn stays small enough for the belly to pass over it.
-/// The rest of the glyph is a spline through points measured off a classic engraved
-/// clef: the belly rises from the spiral's left edge round lines one to three and
-/// crosses the stem on the third line, and the head is a narrow,
-/// pointed loop standing about a space and a half over the staff — the reason the
-/// row reserves 14 mm above its baseline.
-///
-/// ponytail: a procedural G clef rather than a real glyph outline. It reads
-/// correctly at print size; embed a music font if it ever has to be exact.
+/// The table is `ARCS` of ClefSol's `nombre_dor.py` (its `TRONCONS`), in the
+/// same font units, so a tweak there carries over as is.
 fn g_clef(cx: f32, y0: f32, sp: f32, out: &mut Vec<Prim>) {
-    const R0: f32 = 0.10;
-    const R: f32 = 1.05;
-    const TURNS: f32 = 1.5;
-    const SQUASH: f32 = 0.93; // the bowl is a touch wider than tall, as engraved
-    const SPIRAL_STEPS: usize = 108;
-    // Stroke width at each quarter turn: thin inside, thick over the top, thin
-    // along the bottom, swelling again where the upstroke takes over.
-    const SPIRAL_W: [f32; 7] = [0.10, 0.12, 0.16, 0.26, 0.24, 0.12, 0.22];
-    // (x, y, width) from the spiral's end: a Catmull-Rom spline runs through them.
-    const PATH: [[f32; 3]; 24] = [
-        [-1.05, 0.00, 0.22],
-        [-0.98, 0.50, 0.35], // the thick left side of the belly
-        [-0.68, 0.86, 0.42],
-        [-0.22, 1.04, 0.46],
-        [0.27, 1.00, 0.50], // crosses the stem on the third line
-        [0.62, 1.28, 0.45],
-        [0.80, 1.80, 0.37],
-        [0.84, 2.40, 0.26],
-        [0.78, 3.00, 0.16],
-        [0.62, 3.80, 0.24],
-        [0.42, 4.18, 0.40], // the apex, a space and a half over the top line
-        [0.24, 3.95, 0.32],
-        [0.14, 3.50, 0.24],
-        [0.09, 3.00, 0.16],
-        [0.09, 2.50, 0.12],
-        [0.16, 1.90, 0.13], // the stem, leaning like a pen stroke
-        [0.27, 1.00, 0.13],
-        [0.38, 0.00, 0.13],
-        [0.47, -1.00, 0.13],
-        [0.54, -1.70, 0.14],
-        [0.50, -2.25, 0.16], // the hook
-        [0.22, -2.48, 0.20],
-        [-0.12, -2.44, 0.24],
-        [-0.35, -2.25, 0.30],
+    /// Font units to the space (SMuFL's 250, as in the construction).
+    const UNIT: f32 = 1.0 / 250.0;
+    /// The stroke's width at the eye, in units.
+    const W0: f32 = 25.0;
+    /// (k, sweep, width): an arc of radius φ^k spaces sweeping that many
+    /// degrees, a left turn when positive, and the width it ends on, in units.
+    const ARCS: [(i32, f32, f32); 13] = [
+        (-2, -90.0, 50.0), // the eye's inner turn, thin at the top on the B line
+        (-1, -90.0, 25.0),
+        (0, -90.0, 82.0), // the bowl round the G line: full on the right,
+        (0, -90.0, 30.0), // thin at the bottom on the E line,
+        (1, -90.0, 90.0), // full on the left
+        (0, -57.0, 88.0), // the rise and the diagonal, full
+        (4, 19.0, 60.0),
+        (0, 38.0, 32.0),  // the loop's right flank, thin
+        (-1, 90.0, 70.0), // the loop's top, full coming down
+        (-2, 95.0, 42.0),
+        (8, 7.0, 42.0),    // the stem, leaning 5 to 12 degrees
+        (-1, -90.0, 36.0), // the hook: an inward golden spiral ending in a swell
+        (-2, -110.0, 60.0),
     ];
-    const DOT: [f32; 3] = [R0, 0.00, 0.12];
-    const PEARL: [f32; 3] = [-0.43, -2.00, 0.37];
+    /// Farthest a sampled edge may stray from its arc, in spaces.
+    const SAG: f32 = 0.002;
 
-    let g = y0 + sp; // the G line: the second one up, which the spiral curls around
+    let phi = (1.0 + 5f32.sqrt()) / 2.0;
+    let g = y0 + sp; // the G line
     let at = |x: f32, y: f32| P {
         x: cx + x * sp,
         y: g + y * sp,
     };
-    let mut path: Vec<(P, f32)> = Vec::with_capacity(SPIRAL_STEPS + 1 + (PATH.len() - 1) * 6);
-
-    for i in 0..=SPIRAL_STEPS {
-        let u = i as f32 / SPIRAL_STEPS as f32;
-        let turns = TURNS * u;
-        let r = R0 + (R - R0) * u;
-        let phi = std::f32::consts::TAU * turns; // clockwise from three o'clock
-        let q = turns * 4.0;
-        let k = (q as usize).min(SPIRAL_W.len() - 2);
-        let w = SPIRAL_W[k] + (SPIRAL_W[k + 1] - SPIRAL_W[k]) * (q - k as f32);
-        path.push((at(r * phi.cos(), -r * phi.sin() * SQUASH), w));
+    // Both edges, sampled along every arc: (left, right) seen walking the stroke.
+    let mut edges: Vec<(P, P)> = Vec::new();
+    let mut starts = Vec::with_capacity(ARCS.len());
+    let (mut x, mut y, mut heading, mut w0) = (0.0f32, 0.0f32, std::f32::consts::PI, W0 * UNIT);
+    for (k, sweep, w1) in ARCS {
+        let (r, a, w1) = (phi.powi(k), sweep.to_radians(), w1 * UNIT);
+        let side = a.signum(); // the centre lies on the side the stroke turns to
+        let normal = heading + side * std::f32::consts::FRAC_PI_2;
+        let (ox, oy) = (x + r * normal.cos(), y + r * normal.sin());
+        let t0 = (y - oy).atan2(x - ox);
+        let edge = |u: f32| {
+            let t = t0 + a * u;
+            let half = 0.5 * (w0 + (w1 - w0) * u * u * (3.0 - 2.0 * u));
+            let p = |rr: f32| at(ox + rr * t.cos(), oy + rr * t.sin());
+            (p(r - side * half), p(r + side * half))
+        };
+        let n = (a.abs() / (8.0 * SAG / r).sqrt()).ceil().max(1.0) as usize;
+        starts.push(edges.len());
+        edges.extend((0..n).map(|i| edge(i as f32 / n as f32)));
+        if starts.len() == ARCS.len() {
+            edges.push(edge(1.0));
+        }
+        (x, y) = (ox + r * (t0 + a).cos(), oy + r * (t0 + a).sin());
+        heading += a;
+        w0 = w1;
     }
-
-    // Clamping the ends makes the first tangent point straight up, which is
-    // exactly how the eased spiral arrives.
-    spline(&PATH, at, &mut path);
-    stroke(&path, sp, out);
-    for [x, y, r] in [DOT, PEARL] {
+    // One fill per arc: the whole outline crosses itself, which the screen's
+    // triangulation cannot take. Each piece runs one sample into the next arc,
+    // so abutting fills overlap and no hairline seam shows between them.
+    for (j, &s) in starts.iter().enumerate() {
+        let e = starts.get(j + 1).map_or(edges.len() - 1, |&next| next + 1);
+        let piece = &edges[s..=e];
         out.push(Prim::Poly {
-            pts: ellipse(at(x, y), r * sp, r * sp, 0.0),
+            pts: piece
+                .iter()
+                .map(|p| p.0)
+                .chain(piece.iter().rev().map(|p| p.1))
+                .collect(),
+            color: INK,
+        });
+    }
+    // Round ends: the eye, and the hook's swell.
+    for (p, w) in [(at(0.0, 0.0), W0 * UNIT), (at(x, y), w0)] {
+        out.push(Prim::Poly {
+            pts: ellipse(p, 0.5 * w * sp, 0.5 * w * sp, 0.0),
             color: INK,
         });
     }
