@@ -131,6 +131,14 @@ never know about pages, egui or PDF.
   the logo and one random `EXPANSIONS` reading, up for 2.2 s or until the first click/key, then
   gone for the session (`splash_until: Option<Instant>`). Its reading is an independent draw from
   the window title's `random_expansion()` — both re-roll every launch.
+- **Closing the window is held in `App::logic`, not `ui`.** eframe 0.36 runs only `logic` for a
+  minimised or occluded window (`epi_integration.rs`, `update_logic_only`), and cancels a close
+  only if the root viewport's commands carry `ViewportCommand::CancelClose`. A programmatic
+  `ViewportCommand::Close` is turned by egui-winit into the same `ViewportEvent::Close` a click on
+  the close button makes, so Quit just sends `Close` and lets `logic` ask; the unsaved-changes
+  "discard" answer clears `dirty` before sending it again. Tested headlessly through
+  `Context::run_logic` with eframe's `#[doc(hidden)]` `CreationContext::_new_kittest` and
+  `Frame::_new_kittest`.
 - **`muda` (native macOS menu bar) was tried and reverted — do not retry without checking upstream
   first.** muda 0.19.3's custom `NSMenuItem` subclass (`MudaMenuItem`) stores a raw pointer
   (`#[ivars = Cell<*const MenuChild>]`) to its Rust-side data instead of an owned/reference-counted
@@ -224,7 +232,15 @@ needed no migration either: a JSON array reads as both. It was bumped anyway so 
 reports a four-string file as too new instead of as corrupt. `from_json` refuses an empty tuning,
 one over `MAX_STRINGS`, or a note on a string the tuning lacks — `Document::pitch` indexes the
 tuning with `note.string`, so that is the invariant every loaded document keeps. The editor keeps
-it too: `retune` drops notes that lose their string, and `paste` skips them.
+it too: `retune` drops notes that lose their string, `paste` skips them, and a typed fret on a
+string the tuning lacks (a selection an undo left behind) writes nothing.
+
+A `.gtab` is untrusted input, and so is the system clipboard (pasted as JSON `Vec<Event>`, which
+never goes through `from_json`). Each guard sits where every entry point passes: `Dur`'s
+`Deserialize` refuses more than `MAX_DOTS` dots (they feed a shift), `Document::pitch` caps at
+MIDI 127 instead of wrapping a `u8`, and `from_json` itself refuses a time signature with no
+beats or a denominator that is no note value, and clamps `tab_scale`/`note_spacing` into
+0.25–4.0 (an f32 overflow reads as infinity).
 
 **Add an instrument or a tuning preset.** A row in `model::TUNINGS` (index 0 = the top tab line);
 an instrument's first row is its default, and the first row of each length is what the string-count

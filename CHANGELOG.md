@@ -4,6 +4,26 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.2.1] — 2026-09-25
+
+### Corrigé
+- Fermer la fenêtre (bouton de fermeture, Alt+F4, Quitter depuis le Dock ou la barre des tâches)
+  avec des modifications non enregistrées pose désormais la question au lieu de tout perdre.
+- Nouveau et Ouvrir repartent d'un historique vide : un Annuler juste après l'ouverture d'un
+  fichier ne ramène plus le morceau précédent sous le nom du nouveau (qu'un Enregistrer aurait
+  alors écrasé).
+- Plus de plantage en tapant une case après l'ouverture d'un fichier ou un Annuler qui compte
+  moins de cordes que la sélection.
+- Windows : ouvrir le PDF exporté passe par l'Explorateur et non plus par `cmd`, qui lisait un
+  `&` du nom de fichier (repris du titre du morceau) comme une seconde commande à exécuter.
+- Le nom proposé pour le PDF retire les caractères qu'un système de fichiers refuse (« AC/DC »).
+- L'enregistrement passe par un fichier temporaire renommé ensuite : un plantage en pleine
+  écriture laisse la version précédente intacte au lieu d'un fichier tronqué.
+- Un fichier `.gtab` (ou un collage) aux valeurs hors limites ne fait plus planter ni ne produit
+  de hauteurs fausses : trop de points d'augmentation ou une mesure sans temps sont refusés, la
+  hauteur est plafonnée au lieu de déborder, l'échelle et l'espacement sont ramenés dans des
+  bornes raisonnables.
+
 ## [4.2.0] — 2026-09-25
 
 ### Ajouté

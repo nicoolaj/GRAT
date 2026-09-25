@@ -171,7 +171,11 @@ impl<'de> Deserialize<'de> for Dur {
             DurWire::Ticks(ticks) => Dur::from_ticks(ticks).ok_or_else(|| {
                 serde::de::Error::custom(format!("not a valid duration tick count: {ticks}"))
             }),
-            DurWire::V1 { base, dots } => Ok(Dur { base, dots }),
+            // `ticks` shifts by the dot count: an unbounded one overflows it.
+            DurWire::V1 { base, dots } if dots <= MAX_DOTS => Ok(Dur { base, dots }),
+            DurWire::V1 { dots, .. } => Err(serde::de::Error::custom(format!(
+                "too many augmentation dots: {dots}"
+            ))),
         }
     }
 }
@@ -700,7 +704,8 @@ impl Document {
         }
         let mut doc: Document = serde_json::from_value(json).map_err(|_| LoadError::Parse)?;
         // A hand-edited tuning could leave a note with no string to sound on, and
-        // `pitch` indexes the tuning with it.
+        // `pitch` indexes the tuning with it. A time signature with no beats, or a
+        // denominator that is no note value, has no bar to fill.
         let strings = doc.tuning.len();
         if !(1..=MAX_STRINGS).contains(&strings)
             || doc
@@ -709,9 +714,19 @@ impl Document {
                 .flat_map(|b| &b.events)
                 .flat_map(|e| &e.notes)
                 .any(|n| n.string as usize >= strings)
+            || doc
+                .bars
+                .iter()
+                .filter_map(|b| b.time_sig)
+                .any(|(num, den)| num == 0 || !matches!(den, 1 | 2 | 4 | 8 | 16 | 32))
         {
             return Err(LoadError::Parse);
         }
+        // Past these bounds the page stops being a page, and a number too big
+        // for an f32 arrives as infinity. A pre-0.3.0 file's 1.3 or 0.7 is well
+        // inside, so it still renders as its author left it.
+        doc.tab_scale = doc.tab_scale.clamp(0.25, 4.0);
+        doc.note_spacing = doc.note_spacing.clamp(0.25, 4.0);
         // A hand-edited file could drop the tab; without it nothing is clickable.
         if !doc.rows.contains(&Row::Tab) {
             doc.rows.insert(0, Row::Tab);
@@ -728,8 +743,13 @@ impl Document {
     }
 
     /// Sounding MIDI pitch of `note`, given this document's tuning and capo.
+    /// Capped at the top of the MIDI range rather than wrapping: a hand-edited
+    /// fret or capo (or a pasted one) can push the sum past a `u8`.
     pub fn pitch(&self, note: &Note) -> u8 {
-        self.tuning[note.string as usize] + note.fret + self.capo
+        let sum = u16::from(self.tuning[note.string as usize])
+            + u16::from(note.fret)
+            + u16::from(self.capo);
+        sum.min(127) as u8
     }
 
     /// True when some string sounds higher than the one drawn above it — a

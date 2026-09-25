@@ -220,6 +220,43 @@ fn a_bass_document_round_trips_and_bad_tunings_are_refused() {
 }
 
 #[test]
+fn from_json_refuses_or_tames_what_the_editor_never_writes() {
+    // A v1 duration's dots feed a shift in `Dur::ticks`: 200 of them panicked.
+    let dotted = |dots: u8| {
+        format!(r#"{{"bars": [{{"events": [{{"dur": {{"base": "Quarter", "dots": {dots}}}}}]}}]}}"#)
+    };
+    assert!(Document::from_json(&dotted(MAX_DOTS)).is_ok());
+    assert_eq!(Document::from_json(&dotted(200)), Err(LoadError::Parse));
+
+    for sig in ["[0, 4]", "[4, 0]", "[4, 3]"] {
+        let json = format!(r#"{{"bars": [{{"time_sig": {sig}, "events": [{{"dur": 960}}]}}]}}"#);
+        assert_eq!(Document::from_json(&json), Err(LoadError::Parse), "{sig}");
+    }
+
+    // 1e39 overflows an f32 into infinity; both knobs come back on the page.
+    let doc = Document::from_json(r#"{"note_spacing": 1e39, "tab_scale": -1}"#).unwrap();
+    assert_eq!((doc.note_spacing, doc.tab_scale), (4.0, 0.25));
+    let old = Document::from_json(r#"{"note_spacing": 0.7, "tab_scale": 1.3}"#).unwrap();
+    assert_eq!(
+        (old.note_spacing, old.tab_scale),
+        (0.7, 1.3),
+        "a pre-0.3.0 file is left alone"
+    );
+}
+
+#[test]
+fn pitch_caps_at_the_top_of_the_midi_range() {
+    // 64 + 255 + 255 wrapped a u8 (and panicked in a debug build).
+    let doc = Document::from_json(
+        r#"{"capo": 255, "bars": [{"events": [{"dur": 960, "notes": [{"string": 0, "fret": 255}]}]}]}"#,
+    )
+    .unwrap();
+    assert_eq!(doc.pitch(&doc.bars[0].events[0].notes[0]), 127);
+    assert!(!layout::paginate(&doc).is_empty());
+    assert!(!pdf::export(&doc).is_empty());
+}
+
+#[test]
 fn retune_keeps_the_frets_or_the_pitches() {
     // Keeping the frets: the tab is untouched, notes on a vanished string go.
     let mut doc = one_event(&[(0, 3), (5, 2)]);

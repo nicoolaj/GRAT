@@ -163,11 +163,59 @@ fn open_file(path: &std::path::Path) {
     let _ = std::process::Command::new("open").arg(path).spawn();
     #[cfg(target_os = "linux")]
     let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+    // explorer, never `cmd /C start`: cmd reads a `&` in the file name as the
+    // start of a second command, and the name defaults to the document's title.
+    // Quoted by hand (a Windows path cannot hold `"`) so explorer, which splits
+    // its own command line at commas, gets the path whole.
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd")
-        .args(["/C", "start", ""])
-        .arg(path)
-        .spawn();
+    {
+        use std::os::windows::process::CommandExt;
+        let mut arg = std::ffi::OsString::from("\"");
+        arg.push(path);
+        arg.push("\"");
+        let _ = std::process::Command::new("explorer").raw_arg(arg).spawn();
+    }
+}
+
+/// The name the PDF save dialog proposes: the title, less the characters no
+/// file system takes (a title like "AC/DC" would otherwise name a folder).
+fn pdf_file_name(title: &str) -> String {
+    let stem: String = title
+        .chars()
+        .map(|c| {
+            if c.is_control() || r#"\/:*?"<>|"#.contains(c) {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    // Windows drops trailing dots and spaces, and a leading dot hides the file.
+    let stem = stem.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    format!("{}.pdf", if stem.is_empty() { "untitled" } else { stem })
+}
+
+/// Write `bytes` to `path` without ever leaving it half-written: into a sibling
+/// temporary file, flushed to disk, then renamed over the original, so a crash
+/// mid-save leaves the previous version whole instead of a truncated one.
+///
+/// ponytail: the renamed file takes default permissions and replaces a symlink
+/// rather than writing through it; copy the metadata and resolve the link first
+/// if anyone saves through one.
+fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let write = || -> std::io::Result<()> {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)
+    };
+    write().inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
 fn main() -> eframe::Result {
@@ -442,14 +490,6 @@ impl TablaturesApp {
         }
     }
 
-    fn request_quit(&mut self, ctx: &egui::Context) {
-        if self.dirty {
-            self.pending = Some(PendingAction::Quit);
-        } else {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
-    }
-
     /// Retune straight away when no written note would move or sound different;
     /// otherwise ask first whether to keep the frets or the pitches.
     fn request_retune(&mut self, instrument: Instrument, tuning: Vec<u8>) {
@@ -561,7 +601,7 @@ impl TablaturesApp {
     }
 
     fn do_new(&mut self) {
-        self.doc = Document::new_empty();
+        canvas::replace_document(&mut self.editor, &mut self.doc, Document::new_empty());
         self.path = None;
         self.dirty = false;
         self.layout_dirty = true;
@@ -580,7 +620,7 @@ impl TablaturesApp {
             .map(|s| Document::from_json(&s))
         {
             Some(Ok(doc)) => {
-                self.doc = doc;
+                canvas::replace_document(&mut self.editor, &mut self.doc, doc);
                 self.path = Some(path);
                 self.dirty = false;
                 self.layout_dirty = true;
@@ -623,7 +663,7 @@ impl TablaturesApp {
             self.status_msg = Some(t("error.save"));
             return;
         };
-        match std::fs::write(&path, json) {
+        match write_atomic(&path, json.as_bytes()) {
             Ok(()) => {
                 self.path = Some(path);
                 self.dirty = false;
@@ -638,11 +678,9 @@ impl TablaturesApp {
     /// (wired up by the caller via `pending_open_pdf`) is how the user reaches the
     /// OS print dialog instead.
     fn do_export(&mut self) {
-        let stem = self.doc.title.trim();
-        let default_name = format!("{}.pdf", if stem.is_empty() { "untitled" } else { stem });
         let Some(path) = rfd::FileDialog::new()
             .add_filter(t("dialog.pdf_filter"), &["pdf"])
-            .set_file_name(&default_name)
+            .set_file_name(pdf_file_name(&self.doc.title))
             .save_file()
         else {
             return;
@@ -722,7 +760,8 @@ impl TablaturesApp {
                         .add(egui::Button::new(t("menu.quit")).shortcut_text(sc_quit))
                         .clicked()
                     {
-                        self.request_quit(ui.ctx());
+                        // `logic` holds the window open while there is unsaved work.
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                         ui.close();
                     }
                 });
@@ -1078,6 +1117,21 @@ fn row_label(row: Row) -> String {
 }
 
 impl eframe::App for TablaturesApp {
+    /// Every close request -- the window's own close button, Alt+F4, Quit from
+    /// the menu or its shortcut -- is held while there is unsaved work, and the
+    /// unsaved-changes question asked instead. Here rather than in `ui`: eframe
+    /// runs only `logic` for a minimised window, so a quit from the dock or the
+    /// taskbar would otherwise slip through. The window is brought back so the
+    /// question can be seen.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.dirty && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            self.pending = Some(PendingAction::Quit);
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.splash(ui) {
             return;
@@ -1103,7 +1157,7 @@ impl eframe::App for TablaturesApp {
             self.do_export();
         }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_QUIT)) {
-            self.request_quit(ui.ctx());
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_UNDO))
             && canvas::undo(&mut self.editor, &mut self.doc)
@@ -1172,6 +1226,9 @@ impl eframe::App for TablaturesApp {
                             PendingAction::New => self.do_new(),
                             PendingAction::Open => self.do_open(),
                             PendingAction::Quit => {
+                                // The close request `logic` held back comes round
+                                // again; with nothing left unsaved it goes through.
+                                self.dirty = false;
                                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                             }
                         }
@@ -1404,5 +1461,70 @@ impl eframe::App for TablaturesApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(i18n::LANG_STORAGE_KEY, i18n::current_lang());
         storage.set_string(TECH_SHOWN_STORAGE_KEY, self.editor.tech_shown.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::App as _;
+
+    /// One close request, as the window's close button sends it, run through
+    /// `logic` the way eframe does for a minimised window. True if it was held.
+    fn close_is_held(ctx: &egui::Context, app: &mut TablaturesApp) -> bool {
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let out = ctx.run_logic(&input, |ctx| {
+            app.logic(ctx, &mut eframe::Frame::_new_kittest())
+        });
+        out.viewport_commands
+            .get(&egui::ViewportId::ROOT)
+            .is_some_and(|c| c.contains(&egui::ViewportCommand::CancelClose))
+    }
+
+    #[test]
+    fn closing_the_window_over_unsaved_work_asks_first() {
+        let ctx = egui::Context::default();
+        let (rgba, w, h) = load_logo_rgba();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = TablaturesApp::new(&cc, rgba, w, h, None);
+
+        assert!(!close_is_held(&ctx, &mut app), "nothing to lose: it closes");
+        assert!(app.pending.is_none());
+
+        app.dirty = true;
+        assert!(close_is_held(&ctx, &mut app));
+        assert!(matches!(app.pending, Some(PendingAction::Quit)));
+    }
+
+    #[test]
+    fn the_pdf_name_is_the_title_as_a_file_system_takes_it() {
+        assert_eq!(pdf_file_name(""), "untitled.pdf");
+        assert_eq!(pdf_file_name("  ...  "), "untitled.pdf");
+        assert_eq!(pdf_file_name("AC/DC: Live?"), "AC-DC- Live-.pdf");
+        assert_eq!(pdf_file_name(" .Été. "), "Été.pdf");
+    }
+
+    #[test]
+    fn an_atomic_write_replaces_the_file_and_leaves_no_temporary() {
+        let dir = std::env::temp_dir().join(format!("grat-write-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("song.gtab");
+        let tmp = dir.join("song.gtab.tmp");
+
+        write_atomic(&path, b"first").unwrap();
+        write_atomic(&path, b"second").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        assert!(!tmp.exists());
+
+        let missing = dir.join("no-such-folder").join("song.gtab");
+        assert!(write_atomic(&missing, b"x").is_err());
+        assert!(!dir.join("no-such-folder").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

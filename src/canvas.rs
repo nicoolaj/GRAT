@@ -175,6 +175,19 @@ fn mutate(state: &mut EditorState, doc: &mut Document, f: impl FnOnce(&mut Docum
     f(doc);
 }
 
+/// Swap in another document (New, Open). The selection, the fret being typed
+/// and the undo history all belonged to the old one: an undo reaching across
+/// would put the old piece under the new file's name, for the next save to write
+/// over it. The clipboard stays, so music can be carried from one piece to the next.
+pub fn replace_document(state: &mut EditorState, doc: &mut Document, new: Document) {
+    *doc = new;
+    state.selected = None;
+    state.range_anchor = None;
+    state.digit_buffer.clear();
+    state.digit_deadline = None;
+    state.undo_stack.clear();
+}
+
 /// Pop the undo stack onto `doc`. Returns whether it did anything, so the caller
 /// knows whether to mark the file dirty.
 pub fn undo(state: &mut EditorState, doc: &mut Document) -> bool {
@@ -663,7 +676,12 @@ fn next_cell(doc: &Document, sel: Sel) -> Sel {
 /// A typed digit: two within the window combine into one two-digit fret (e.g.
 /// "1" then "2" within [`DIGIT_WINDOW_SECS`] writes fret 12).
 fn handle_digit(state: &mut EditorState, doc: &mut Document, digit: u32, now: f64) -> bool {
-    let Some(sel) = state.selected else {
+    // An undo can bring back fewer strings than the selection sits on, and a
+    // note written there would index past the tuning the moment it is drawn.
+    let Some(sel) = state
+        .selected
+        .filter(|s| (s.string as usize) < doc.tuning.len())
+    else {
         return false;
     };
     if state.digit_deadline.is_none_or(|t| now > t) || state.digit_buffer.len() >= 2 {
@@ -1758,6 +1776,59 @@ mod tests {
         );
         assert_eq!(bar.events[0].notes[0].fret, 7);
         assert_eq!(bar.events.len(), 4, "no rest was inserted");
+    }
+
+    #[test]
+    fn a_digit_on_a_string_the_tuning_lacks_writes_nothing() {
+        let mut doc = Document::new_empty();
+        doc.retune(
+            Instrument::Bass,
+            Instrument::Bass.default_tuning().to_vec(),
+            false,
+        );
+        let mut state = EditorState {
+            selected: Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 5,
+            }),
+            ..Default::default()
+        };
+        assert!(!handle_digit(&mut state, &mut doc, 3, 0.0));
+        assert!(doc.bars[0].events[0].is_rest());
+        // The note it used to write panicked here, indexing the tuning.
+        assert!(!grat::layout::paginate(&doc).is_empty());
+    }
+
+    #[test]
+    fn replacing_the_document_forgets_its_history_and_selection() {
+        let mut doc = Document::new_empty();
+        let mut state = EditorState {
+            selected: Some(Sel {
+                bar: 0,
+                event: 0,
+                string: 5,
+            }),
+            ..Default::default()
+        };
+        assert!(handle_digit(&mut state, &mut doc, 7, 0.0));
+        assert!(copy(&mut state, &doc));
+
+        let mut bass = Document::new_empty();
+        bass.retune(
+            Instrument::Bass,
+            Instrument::Bass.default_tuning().to_vec(),
+            false,
+        );
+        replace_document(&mut state, &mut doc, bass.clone());
+        assert_eq!(doc, bass);
+        assert_eq!(state.selected, None);
+        assert!(
+            !undo(&mut state, &mut doc),
+            "no way back into the old piece"
+        );
+        assert_eq!(doc, bass);
+        assert!(!state.clipboard.is_empty(), "the clipboard carries over");
     }
 
     #[test]
