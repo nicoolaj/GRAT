@@ -842,6 +842,86 @@ impl Document {
             .unwrap_or((4, 4))
     }
 
+    /// Insert a bar of rests at `at`, in the metre in force there: the bar before
+    /// it names that metre, or, at the very top, the first bar does.
+    pub fn insert_bar(&mut self, at: usize) {
+        let at = at.min(self.bars.len());
+        let sig = match self.bars.len() {
+            0 => (4, 4),
+            len => self.time_sig_at(at.saturating_sub(1).min(len - 1)),
+        };
+        let bar = Bar {
+            events: Bar::new_empty(Some(sig)).events,
+            // The top bar is the one that names the piece's metre.
+            time_sig: if at == 0 { Some(sig) } else { None },
+            ..Bar::default()
+        };
+        self.bars.insert(at, bar);
+    }
+
+    /// Copy bars `first..=last` in right after themselves. The copies play in
+    /// the same metres, and carry no repeat marks: a copied passage is new music,
+    /// not a second repeat.
+    pub fn duplicate_bars(&mut self, first: usize, last: usize) {
+        let Some(last) = last.checked_add(1).map(|end| end.min(self.bars.len())) else {
+            return;
+        };
+        if first >= last {
+            return;
+        }
+        let mut copies: Vec<Bar> = self.bars[first..last].to_vec();
+        for bar in &mut copies {
+            bar.repeat_start = false;
+            bar.repeat_end = None;
+        }
+        // The first copy follows the last original, whose metre may differ.
+        if self.time_sig_at(first) != self.time_sig_at(last - 1) {
+            copies[0].time_sig = Some(self.time_sig_at(first));
+        }
+        self.bars.splice(last..last, copies);
+    }
+
+    /// Remove bars `first..=last`, handing on what the bars after them relied
+    /// on: the metre in force passes to the next bar, an opening repeat whose
+    /// passage goes on past the cut moves to the next bar, and a closing repeat
+    /// whose passage began before it moves to the bar before, with its count. A
+    /// passage cut out whole takes both its marks with it. At least one bar
+    /// always stays.
+    pub fn delete_bars(&mut self, first: usize, last: usize) {
+        let last = last.min(self.bars.len().saturating_sub(1));
+        if first > last || self.bars.is_empty() {
+            return;
+        }
+        let before = if first == 0 {
+            (4, 4)
+        } else {
+            self.time_sig_at(first - 1)
+        };
+        let after = self.time_sig_at(last);
+        let gone: Vec<Bar> = self.bars.drain(first..=last).collect();
+        let opens = gone
+            .iter()
+            .rposition(|b| b.repeat_start)
+            .is_some_and(|i| gone[i..].iter().all(|b| b.repeat_end.is_none()));
+        let closes = gone
+            .iter()
+            .position(|b| b.repeat_end.is_some())
+            .filter(|&i| gone[..=i].iter().all(|b| !b.repeat_start))
+            .and_then(|i| gone[i].repeat_end);
+        if let Some(next) = self.bars.get_mut(first) {
+            if next.time_sig.is_none() && after != before {
+                next.time_sig = Some(after);
+            }
+            next.repeat_start |= opens;
+        }
+        if let Some(prev) = first.checked_sub(1).and_then(|i| self.bars.get_mut(i)) {
+            prev.repeat_end = prev.repeat_end.or(closes);
+        }
+        if self.bars.is_empty() {
+            self.bars.push(Bar::new_empty(Some(before)));
+        }
+    }
+
     /// A fresh document: 8 empty (rest-filled) 4/4 bars, so a new page isn't blank
     /// and every beat already has a clickable cell.
     pub fn new_empty() -> Self {

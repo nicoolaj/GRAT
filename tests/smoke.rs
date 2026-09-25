@@ -1246,3 +1246,93 @@ fn a_repeat_count_loads_within_what_the_menus_offer() {
     assert_eq!(doc.bars[0].repeat_end, Some(grat::model::MAX_REPEAT_PLAYS));
     assert_eq!(doc.bars[1].repeat_end, Some(2));
 }
+
+#[test]
+fn inserting_a_bar_takes_the_metre_in_force_there() {
+    let mut doc = Document::new_empty();
+    engrave::set_time_sig(&mut doc, 2, Some((3, 4)));
+    doc.insert_bar(3); // inside the 3/4 section
+    assert_eq!(doc.time_sig_at(3), (3, 4));
+    assert!(engrave::is_complete(&doc.bars[3], (3, 4)));
+    assert_eq!(
+        doc.bars[3].time_sig, None,
+        "it inherits, like its neighbours"
+    );
+    doc.insert_bar(0);
+    assert_eq!(
+        doc.bars[0].time_sig,
+        Some((4, 4)),
+        "the top bar names the metre"
+    );
+    let mut empty = Document::new_empty();
+    empty.bars.clear();
+    empty.insert_bar(0);
+    assert_eq!(empty.bars.len(), 1);
+}
+
+#[test]
+fn deleting_bars_hands_on_their_metre_and_repeats() {
+    // 4/4 | 4/4 | 3/4 | (3/4) | (3/4) ...
+    let mut doc = Document::new_empty();
+    engrave::set_time_sig(&mut doc, 2, Some((3, 4)));
+    let len = doc.bars.len();
+    doc.delete_bars(2, 2); // the bar that changed the metre
+    assert_eq!(doc.bars.len(), len - 1);
+    assert_eq!(
+        doc.time_sig_at(2),
+        (3, 4),
+        "the change moves to the next bar"
+    );
+
+    // |: 1 2 3 :|x3 -- cut bars 0-1: the opening repeat moves to bar 2's heir.
+    let mut doc = Document::new_empty();
+    doc.bars[0].repeat_start = true;
+    doc.bars[3].repeat_end = Some(3);
+    doc.delete_bars(0, 1);
+    assert!(doc.bars[0].repeat_start && doc.bars[1].repeat_end == Some(3));
+
+    // The same passage, cut at its end: the closing repeat moves back a bar.
+    let mut doc = Document::new_empty();
+    doc.bars[0].repeat_start = true;
+    doc.bars[3].repeat_end = Some(3);
+    doc.delete_bars(3, 4);
+    assert!(doc.bars[0].repeat_start && doc.bars[2].repeat_end == Some(3));
+
+    // A passage cut out whole takes its marks with it.
+    let mut doc = Document::new_empty();
+    doc.bars[1].repeat_start = true;
+    doc.bars[2].repeat_end = Some(2);
+    doc.delete_bars(1, 2);
+    assert!(doc
+        .bars
+        .iter()
+        .all(|b| !b.repeat_start && b.repeat_end.is_none()));
+
+    // Everything goes: one bar stays.
+    let mut doc = Document::new_empty();
+    let n = doc.bars.len();
+    doc.delete_bars(0, n - 1);
+    assert_eq!(doc.bars.len(), 1);
+}
+
+#[test]
+fn duplicated_bars_keep_their_metre_but_not_their_repeats() {
+    let mut doc = Document::new_empty();
+    doc.bars[1].events[0].notes.push(Note {
+        string: 0,
+        fret: 7,
+        tech: Technique::Plain,
+        tie_next: false,
+    });
+    doc.bars[1].repeat_start = true;
+    engrave::set_time_sig(&mut doc, 2, Some((3, 4)));
+    doc.bars[2].repeat_end = Some(2);
+    let len = doc.bars.len();
+    doc.duplicate_bars(1, 2); // a 4/4 bar then a 3/4 one
+    assert_eq!(doc.bars.len(), len + 2);
+    assert_eq!(doc.bars[3].events[0].notes[0].fret, 7);
+    assert_eq!(doc.time_sig_at(3), (4, 4), "the copy goes back to 4/4");
+    assert_eq!(doc.time_sig_at(4), (3, 4));
+    assert!(!doc.bars[3].repeat_start && doc.bars[4].repeat_end.is_none());
+    assert!(doc.bars[1].repeat_start && doc.bars[2].repeat_end == Some(2));
+}

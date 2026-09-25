@@ -4,6 +4,18 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.5.0] — 2026-09-26
+
+### Ajouté
+- Menu « Mesure » (et clic droit) : insérer une mesure avant ou après la sélection, dupliquer ou
+  supprimer les mesures sélectionnées, chacun en une seule étape d'annulation.
+  - Une mesure insérée prend le chiffrage en vigueur à cet endroit.
+  - Les copies gardent leur chiffrage mais pas les marques de reprise.
+  - Une suppression transmet ce dont dépend la suite : le changement de chiffrage passe à la
+    mesure suivante, une ‖: dont le passage continue passe à la mesure suivante, une :‖ à la
+    précédente avec son nombre de passages ; une reprise supprimée en entier disparaît. Il reste
+    toujours au moins une mesure.
+
 ## [4.4.0] — 2026-09-26
 
 ### Ajouté

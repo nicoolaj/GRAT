@@ -1455,6 +1455,50 @@ pub fn repeat_controls(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Doc
     changed
 }
 
+/// What the Bar menu does to the bars themselves: each takes the selection's
+/// first and last bar, changes the document, and names the bar to select after.
+type BarOp = fn(&mut Document, usize, usize) -> usize;
+const BAR_OPS: [(&str, BarOp); 4] = [
+    ("menu.insert_bar_before", |doc, first, _| {
+        doc.insert_bar(first);
+        first
+    }),
+    ("menu.insert_bar_after", |doc, _, last| {
+        doc.insert_bar(last + 1);
+        last + 1
+    }),
+    ("menu.duplicate_bars", |doc, first, last| {
+        doc.duplicate_bars(first, last);
+        last + 1
+    }),
+    ("menu.delete_bars", |doc, first, last| {
+        doc.delete_bars(first, last);
+        first
+    }),
+];
+
+/// Run `op` on the selected bars as one undo step, then select the first cell of
+/// the bar it names, on the same string: the new bar, the copy, or whatever
+/// took the deleted bars' place.
+fn bar_op(state: &mut EditorState, doc: &mut Document, op: BarOp) -> bool {
+    let Some((first, last)) = selected_bars(state, doc) else {
+        return false;
+    };
+    let string = state.selected.map_or(0, |s| s.string);
+    let mut bar = first;
+    mutate(state, doc, |doc| bar = op(doc, first, last));
+    state.range_anchor = None;
+    set_sel(
+        state,
+        Some(Sel {
+            bar: bar.min(doc.bars.len().saturating_sub(1)),
+            event: 0,
+            string,
+        }),
+    );
+    true
+}
+
 /// The Bar menu, shown both in the menu bar and at a right click on the score:
 /// everything done to the selected bars. True when the document changed.
 pub fn bar_menu(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -> bool {
@@ -1472,6 +1516,13 @@ pub fn bar_menu(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) 
         ui.close();
     }
     changed |= repeat_controls(ui, state, doc);
+    ui.separator();
+    for (key, op) in BAR_OPS {
+        if ui.add_enabled(enabled, egui::Button::new(t(key))).clicked() {
+            changed |= bar_op(state, doc, op);
+            ui.close();
+        }
+    }
     changed
 }
 
@@ -1983,6 +2034,45 @@ mod tests {
         assert!(is_convex(&head));
         let beam = [(0.0, 0.0), (8.0, 1.0), (8.0, 2.2), (0.0, 1.2)].map(|(x, y)| egui::pos2(x, y));
         assert!(is_convex(&beam));
+    }
+
+    #[test]
+    fn a_bar_operation_selects_the_bar_it_made() {
+        let mut doc = Document::new_empty();
+        let len = doc.bars.len();
+        let cell = |bar, string| Sel {
+            bar,
+            event: 2,
+            string,
+        };
+        let mut state = EditorState {
+            selected: Some(cell(3, 4)),
+            range_anchor: Some(cell(2, 0)),
+            ..Default::default()
+        };
+        let [before, after, duplicate, delete] = BAR_OPS.map(|(_, op)| op);
+        assert!(bar_op(&mut state, &mut doc, duplicate));
+        assert_eq!(doc.bars.len(), len + 2);
+        assert_eq!(
+            state.selected,
+            Some(Sel {
+                event: 0,
+                ..cell(4, 4)
+            }),
+            "the copy"
+        );
+        assert_eq!(state.range_anchor, None);
+        assert!(bar_op(&mut state, &mut doc, after));
+        assert_eq!(state.selected.map(|s| s.bar), Some(5));
+        assert!(bar_op(&mut state, &mut doc, before));
+        assert_eq!(state.selected.map(|s| s.bar), Some(5));
+        assert_eq!(doc.bars.len(), len + 4);
+        assert!(bar_op(&mut state, &mut doc, delete));
+        assert_eq!(doc.bars.len(), len + 3);
+        for _ in 0..4 {
+            assert!(undo(&mut state, &mut doc), "one undo step each");
+        }
+        assert_eq!(doc.bars.len(), len);
     }
 
     #[test]
