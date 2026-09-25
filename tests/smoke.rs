@@ -1199,3 +1199,39 @@ fn a_slur_stops_just_short_of_its_partners_label() {
         );
     }
 }
+
+#[test]
+fn bar_numbers_open_each_system_and_mark_every_bar_of_the_strip() {
+    use grat::Prim;
+    let mut doc = Document::new_empty();
+    doc.bars = (0..40).map(|_| Bar::new_empty(None)).collect();
+    let pt = grat::staff::pt_for_cap(layout::BAR_NUMBER_CAP_MM);
+    let numbers = |prims: &[Prim]| -> Vec<(usize, f32, f32)> {
+        prims
+            .iter()
+            .filter_map(|p| match p {
+                Prim::Text { s, pt: q, pos, .. } if (q - pt).abs() < 1e-4 => {
+                    Some((s.parse().ok()?, pos.x, pos.y))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+
+    // A page: one number per system but the first, each at the head of its line.
+    let pages = layout::paginate(&doc);
+    let on_pages: Vec<_> = pages.iter().flat_map(|p| numbers(&p.prims)).collect();
+    assert!(on_pages.len() >= 5, "{on_pages:?}");
+    assert!(on_pages[0].0 > 1);
+    assert!(on_pages.windows(2).all(|w| w[0].0 < w[1].0));
+    assert!(on_pages.iter().all(|n| (n.1 - on_pages[0].1).abs() < 1e-3));
+
+    // The strip: every bar but the first, on the strip's own paper.
+    let strip = layout::strip(&doc);
+    let on_strip = numbers(&strip.prims);
+    let bars: Vec<usize> = on_strip.iter().map(|n| n.0).collect();
+    assert_eq!(bars, (2..=40).collect::<Vec<_>>());
+    assert!(on_strip
+        .iter()
+        .all(|n| n.2 + layout::BAR_NUMBER_CAP_MM <= strip.height));
+}

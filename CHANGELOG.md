@@ -4,6 +4,13 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.3.0] — 2026-09-26
+
+### Ajouté
+- Numéros de mesure : au début de chaque ligne sur la page et dans le PDF (la mesure 1 exceptée),
+  au-dessus de chaque mesure dans le mode live sur une ligne. Ils sont centrés sur la barre de
+  mesure, juste au-dessus de la portée.
+
 ## [4.2.4] — 2026-09-25
 
 ### Modifié

@@ -40,6 +40,14 @@ const FOOTER_CAP_MM: f32 = 3.0;
 /// Air between two blocks stacked on the same page.
 const BLOCK_GAP_MM: f32 = 6.0;
 
+/// Bar numbers: one at the start of each system on a page, one over every bar
+/// on the live strip -- never the piece's first bar, whose "1" goes without
+/// saying. Centred on the bar's opening barline, just over the top row's top
+/// line, where the band is always clear: a technique glyph starts no nearer
+/// than 3.3 mm after the barline.
+pub const BAR_NUMBER_CAP_MM: f32 = 1.8;
+const BAR_NUMBER_LIFT_MM: f32 = 1.2;
+
 /// Warning rule under an incomplete bar's tablature staff.
 const WARN_COLOR: Rgb = Rgb(0xFF, 0x95, 0x00);
 const WARN_OFFSET_MM: f32 = 0.8;
@@ -188,7 +196,15 @@ pub fn strip(doc: &Document) -> Strip {
     let spacing = engrave::system_spacing(doc, 0..doc.bars.len(), None);
     let mut prims = Vec::new();
     let mut hits = Vec::new();
-    place_block(doc, &spacing, staff::HEAD_MM, height, &mut prims, &mut hits);
+    place_block(
+        doc,
+        &spacing,
+        staff::HEAD_MM,
+        height,
+        true,
+        &mut prims,
+        &mut hits,
+    );
     Strip {
         prims,
         hits,
@@ -271,7 +287,7 @@ fn render_page(
 
     for (range, target, block_h) in systems {
         let spacing = engrave::system_spacing(doc, range.clone(), Some(*target));
-        place_block(doc, &spacing, left_x, top, &mut prims, &mut hits);
+        place_block(doc, &spacing, left_x, top, false, &mut prims, &mut hits);
         top -= block_h + BLOCK_GAP_MM;
     }
 
@@ -380,11 +396,14 @@ fn block_height(doc: &Document, bars: Range<usize>) -> f32 {
 /// being that a fret number, its strum arrow and its note head land in the same
 /// column — stacked with no gap between rows: each row's own band/ledger padding
 /// already reads as the gap.
+/// `number_every_bar` numbers each bar, as the live strip wants; a page numbers
+/// only the bar that opens the system.
 fn place_block(
     doc: &Document,
     spacing: &Spacing,
     x: f32,
     top: f32,
+    number_every_bar: bool,
     out: &mut Vec<Prim>,
     hits: &mut Vec<tablature::Hit>,
 ) {
@@ -394,11 +413,21 @@ fn place_block(
     };
     let mut cursor = top;
     let mut tab_origin_y = None;
-    for &row in &doc.rows {
+    // Baseline of the bar numbers: over the top row's top line, or, for a row
+    // with no lines, inside its own room at the top of the block.
+    let mut number_y = top - BAR_NUMBER_CAP_MM;
+    for (k, &row) in doc.rows.iter().enumerate() {
         let (above, below) = row_extent(doc, row, half_range);
         let origin_y = cursor - above;
         cursor = origin_y - below;
         let origin = P::new(x, origin_y);
+        if k == 0 {
+            number_y = match row {
+                Row::Tab => origin_y + tablature::staff_mm(doc) + BAR_NUMBER_LIFT_MM,
+                Row::Notation => origin_y + 4.0 * notation::SPACE_MM + BAR_NUMBER_LIFT_MM,
+                _ => number_y,
+            };
+        }
         match row {
             Row::Tab => {
                 tablature::render(doc, spacing, origin, out, hits);
@@ -413,6 +442,26 @@ fn place_block(
 
     if let Some(y) = tab_origin_y {
         warn_incomplete_bars(doc, spacing, x, y, out);
+    }
+
+    let numbered = if number_every_bar {
+        spacing.bars.len()
+    } else {
+        1
+    };
+    for bar in spacing.bars.iter().take(numbered).filter(|b| b.index > 0) {
+        // A closing repeat's "x3" stands on this same barline: go over it.
+        let count = doc.bars[bar.index - 1].repeat_end.is_some_and(|n| n > 2);
+        out.push(Prim::Text {
+            pos: P::new(
+                x + bar.x,
+                number_y + if count { BAR_NUMBER_CAP_MM + 0.8 } else { 0.0 },
+            ),
+            s: (bar.index + 1).to_string(),
+            pt: staff::pt_for_cap(BAR_NUMBER_CAP_MM),
+            color: INK,
+            align: Align::Center,
+        });
     }
 }
 
