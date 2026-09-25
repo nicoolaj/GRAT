@@ -93,6 +93,9 @@ pub struct EditorState {
     /// The cell a fret was just typed into, for the app to sound; it takes it.
     pub typed: Option<Sel>,
     undo_stack: Vec<Document>,
+    /// What undo took back, most recent last, for redo to bring back; the next
+    /// edit clears it.
+    redo_stack: Vec<Document>,
 }
 
 const DIGIT_WINDOW_SECS: f64 = 0.6;
@@ -122,6 +125,7 @@ impl Default for EditorState {
             scroll_to_sel: false,
             typed: None,
             undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 }
@@ -138,13 +142,17 @@ pub enum Action {
 /// multi-frame drag can snapshot once at drag-start and then write straight through
 /// every following frame, instead of flooding the 20-deep stack in 20 frames.
 fn snapshot(state: &mut EditorState, doc: &Document) {
-    state.undo_stack.push(doc.clone());
+    push_undo(state, doc.clone());
+    state.redo_stack.clear();
+}
+
+fn push_undo(state: &mut EditorState, doc: Document) {
+    state.undo_stack.push(doc);
     if state.undo_stack.len() > UNDO_DEPTH {
         state.undo_stack.remove(0);
     }
 }
 
-/// Push an undo snapshot, then run the mutation.
 /// The time signatures offered, per bar here and for the whole piece in the
 /// Tools menu.
 /// Grouped by denominator so a signature is found where a musician looks for it.
@@ -199,6 +207,7 @@ pub fn retune(
     }
 }
 
+/// Push an undo snapshot, then run the mutation.
 fn mutate(state: &mut EditorState, doc: &mut Document, f: impl FnOnce(&mut Document)) {
     snapshot(state, doc);
     f(doc);
@@ -315,18 +324,27 @@ pub fn replace_document(state: &mut EditorState, doc: &mut Document, new: Docume
     state.digit_buffer.clear();
     state.digit_deadline = None;
     state.undo_stack.clear();
+    state.redo_stack.clear();
 }
 
 /// Pop the undo stack onto `doc`. Returns whether it did anything, so the caller
 /// knows whether to mark the file dirty.
 pub fn undo(state: &mut EditorState, doc: &mut Document) -> bool {
-    match state.undo_stack.pop() {
-        Some(prev) => {
-            *doc = prev;
-            true
-        }
-        None => false,
-    }
+    let Some(prev) = state.undo_stack.pop() else {
+        return false;
+    };
+    state.redo_stack.push(std::mem::replace(doc, prev));
+    true
+}
+
+/// Bring back what the last undo took back. Returns whether it did anything.
+pub fn redo(state: &mut EditorState, doc: &mut Document) -> bool {
+    let Some(next) = state.redo_stack.pop() else {
+        return false;
+    };
+    let now = std::mem::replace(doc, next);
+    push_undo(state, now);
+    true
 }
 
 pub(crate) fn rgb(c: grat::Rgb) -> egui::Color32 {
@@ -1792,9 +1810,14 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     });
 
     ui.separator();
-    if ui.button(t("tool.undo")).clicked() && undo(state, doc) {
-        action = Some(Action::Changed);
-    }
+    ui.horizontal(|ui| {
+        if ui.button(t("tool.undo")).clicked() && undo(state, doc) {
+            action = Some(Action::Changed);
+        }
+        if ui.button(t("tool.redo")).clicked() && redo(state, doc) {
+            action = Some(Action::Changed);
+        }
+    });
 
     action
 }
@@ -2237,6 +2260,27 @@ mod tests {
 
         state.selected = None;
         assert_eq!(transpose(&mut state, &mut doc, 2), None, "nothing selected");
+    }
+
+    #[test]
+    fn redo_brings_back_what_undo_took_until_the_next_edit() {
+        let (mut state, mut doc) = range_of_notes();
+        let before = doc.clone();
+        assert!(edit_events(&mut state, &mut doc, |e| e.palm_mute = true));
+        let after = doc.clone();
+        assert!(undo(&mut state, &mut doc));
+        assert_eq!(doc, before);
+        assert!(redo(&mut state, &mut doc));
+        assert_eq!(doc, after);
+        assert!(undo(&mut state, &mut doc), "and undone again");
+        assert_eq!(doc, before);
+
+        // A new edit is a new branch: what was undone can no longer come back.
+        assert!(edit_events(&mut state, &mut doc, |e| e.let_ring = true));
+        assert!(!redo(&mut state, &mut doc));
+        assert!(undo(&mut state, &mut doc));
+        replace_document(&mut state, &mut doc, Document::new_empty());
+        assert!(!redo(&mut state, &mut doc), "nor from another piece");
     }
 
     #[test]

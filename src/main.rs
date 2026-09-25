@@ -29,6 +29,10 @@ const SHORTCUT_QUIT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
 const SHORTCUT_UNDO: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
+const SHORTCUT_REDO: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::Z,
+);
 const SHORTCUT_COPY: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
 const SHORTCUT_CUT: egui::KeyboardShortcut =
@@ -782,6 +786,27 @@ impl TablaturesApp {
                 });
 
                 ui.menu_button(t("menu.edit"), |ui| {
+                    for (key, sc, step) in [
+                        (
+                            "tool.undo",
+                            &SHORTCUT_UNDO,
+                            canvas::undo as fn(&mut _, &mut _) -> bool,
+                        ),
+                        ("tool.redo", &SHORTCUT_REDO, canvas::redo),
+                    ] {
+                        let sc = ui.ctx().format_shortcut(sc);
+                        if ui
+                            .add(egui::Button::new(t(key)).shortcut_text(sc))
+                            .clicked()
+                        {
+                            if step(&mut self.editor, &mut self.doc) {
+                                self.dirty = true;
+                                self.layout_dirty = true;
+                            }
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
                     let sc_copy = ui.ctx().format_shortcut(&SHORTCUT_COPY);
                     let sc_cut = ui.ctx().format_shortcut(&SHORTCUT_CUT);
                     let sc_paste = ui.ctx().format_shortcut(&SHORTCUT_PASTE);
@@ -1196,20 +1221,28 @@ impl eframe::App for TablaturesApp {
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_OPEN)) {
             self.request_open();
         }
-        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE)) {
-            self.do_save();
-        }
+        // egui ignores an extra Shift when it matches a shortcut, so each one with
+        // Shift goes before its plain twin -- or Cmd+S would take Cmd+Shift+S.
         if ui
             .ctx()
             .input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE_AS))
         {
             self.do_save_as();
         }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_SAVE)) {
+            self.do_save();
+        }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_EXPORT)) {
             self.do_export();
         }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_QUIT)) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_REDO))
+            && canvas::redo(&mut self.editor, &mut self.doc)
+        {
+            self.dirty = true;
+            self.layout_dirty = true;
         }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_UNDO))
             && canvas::undo(&mut self.editor, &mut self.doc)
@@ -1477,6 +1510,7 @@ impl eframe::App for TablaturesApp {
                     ("menu.save_as", &SHORTCUT_SAVE_AS),
                     ("menu.export_pdf", &SHORTCUT_EXPORT),
                     ("tool.undo", &SHORTCUT_UNDO),
+                    ("tool.redo", &SHORTCUT_REDO),
                     ("menu.copy", &SHORTCUT_COPY),
                     ("menu.cut", &SHORTCUT_CUT),
                     ("menu.paste", &SHORTCUT_PASTE),
@@ -1943,6 +1977,32 @@ mod tests {
         let mut seen: Vec<usize> = TECH_LEGEND.iter().map(|&(t, _, _, _)| number(t)).collect();
         seen.sort_unstable();
         assert_eq!(seen, (0..20).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn cmd_shift_z_redoes_rather_than_undoes() {
+        let mut shot = Shooter::new(Document::new_empty());
+        shot.app.editor.selected = Some(canvas::Sel {
+            bar: 1,
+            event: 0,
+            string: 0,
+        });
+        assert!(canvas::repeat_selection(
+            &mut shot.app.editor,
+            &mut shot.app.doc
+        ));
+        let edited = shot.app.doc.clone();
+        let z = |modifiers| egui::Event::Key {
+            key: egui::Key::Z,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        shot.frame(vec![z(egui::Modifiers::COMMAND)]);
+        assert_ne!(shot.app.doc, edited, "undone");
+        shot.frame(vec![z(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT)]);
+        assert_eq!(shot.app.doc, edited, "and redone, not undone twice");
     }
 
     #[test]

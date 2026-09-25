@@ -4,6 +4,17 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.10.0] — 2026-09-26
+
+### Ajouté
+- Rétablir (Cmd+Maj+Z, menu Édition, bouton à côté d'Annuler dans la palette) : ramène ce
+  qu'Annuler vient de retirer, jusqu'à la modification suivante. Annuler et Rétablir sont aussi
+  en tête du menu Édition.
+
+### Corrigé
+- Cmd+Maj+S ouvre bien « Enregistrer sous » : sur un fichier déjà enregistré, le raccourci
+  enregistrait en silence à la place (egui laissait Cmd+S le capter).
+
 ## [4.9.0] — 2026-09-26
 
 ### Ajouté

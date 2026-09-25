@@ -106,6 +106,10 @@ never know about pages, egui or PDF.
 - `egui 0.36`: `TopBottomPanel` and `SidePanel` are gone — panels are unified as
   `egui::Panel::top/bottom/left/right(id).show(ui, |ui| ...)`. Menu bar is
   `egui::MenuBar::new().ui(ui, |ui| { ui.menu_button(label, |ui| ...) })`.
+- **egui shortcut matching ignores an extra Shift or Alt** (`InputState::consume_shortcut` uses
+  `Modifiers::matches_logically`; egui's own doc says so). Consume the most specific shortcut
+  first: Cmd+Shift+S before Cmd+S, Cmd+Shift+Z before Cmd+Z, or the plain one takes it.
+  `cmd_shift_z_redoes_rather_than_undoes` checks the order through the headless app.
 - eframe needs `features = ["persistence"]` or `cc.storage` is always `None` and `App::save` never
   runs.
 - Reach egui through `eframe::egui`; there is no separate `egui` dependency.
@@ -318,7 +322,7 @@ for the fifteen decorations you can't otherwise see without waiting for their on
 ## Out of scope for v1 — ask before building
 
 Tuplets (triplets); ties across a barline; da capo / segno and alternate endings (1./2.); MusicXML
-or Guitar Pro import and export; multi-level undo beyond the snapshot stack. MIDI (files, devices,
+or Guitar Pro import and export; multi-level undo beyond the snapshot stacks (undo and redo each keep whole-document snapshots). MIDI (files, devices,
 soundfonts) is still out of scope: live mode's own sound (`live.rs`), both the metronome click and
 the piece's own notes, is one synthesised oscillator per sound (a sine tick, a decaying triangle
 wave per note) — never a soundfont, never an import of anyone else's audio format.

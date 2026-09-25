@@ -97,6 +97,7 @@
   "tool.dot": "Point",
   "tool.rest": "Silence",
   "tool.undo": "Annuler",
+  "tool.redo": "Rétablir",
   "tool.zoom": "Zoom",
   "status.page": "Page",
   "status.bar": "Mesure",

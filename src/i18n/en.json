@@ -97,6 +97,7 @@
   "tool.dot": "Dot",
   "tool.rest": "Rest",
   "tool.undo": "Undo",
+  "tool.redo": "Redo",
   "tool.zoom": "Zoom",
   "status.page": "Page",
   "status.bar": "Bar",
