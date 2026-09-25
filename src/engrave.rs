@@ -17,9 +17,10 @@ use crate::model::{Bar, Document, Dur, Event, NoteValue, Technique};
 /// slot left twice as much paper on the right of a bar as on its left. The slot
 /// is floored at this value, so a bar ending on a sixteenth still breathes.
 pub const BAR_LEAD_MM: f32 = 4.375;
-/// Extra room after the event that closes a rhythmic group, as a fraction of its
-/// own slot: one unit between the notes of a group, 1.3 between two groups, so
-/// the beats read apart on every row. See [`group_span`] for where groups end.
+/// Extra room after the event that closes a rhythmic group: one unit between the
+/// notes of a group of quavers, 1.3 between two groups, so the beats read apart
+/// on every row. See [`group_span`] for where groups end, and [`slots`] for why
+/// a group closing on a shorter note still gets a quaver's worth.
 pub const GROUP_GAP: f32 = 0.3;
 /// A system is never squeezed below this fraction of its natural width; past that
 /// point the music overflows rather than becoming unreadable.
@@ -92,20 +93,28 @@ fn group_span(time_sig: (u8, u8), bar: &Bar) -> u32 {
 }
 
 /// Paper each event of `bar` moves the cursor on by, its lead-in apart: the
-/// duration slot, widened by [`GROUP_GAP`] where the next event opens a group.
-/// The last event's slot is the air before the barline, floored at
-/// [`BAR_LEAD_MM`].
+/// duration slot, and where the next event opens a group, `1 + GROUP_GAP` times
+/// that slot floored at a quaver's. The last event's slot is the air before the
+/// barline, floored at [`BAR_LEAD_MM`].
 ///
-/// A tied note keeps the slot of its own value. Flooring it at a quaver's, so
-/// every tie got the same room, made a tied sixteenth look longer than the
-/// dotted quaver before it -- the rhythm is what the spacing shows first. Short
-/// ties are `notation::ties`' business instead.
+/// The floor makes the space between two beats one constant wherever a group
+/// closes on a quaver or anything shorter: without it a beat ending on a
+/// sixteenth (a syncopation `for_export` cut at the beat) stood closer to the
+/// next than a beat ending on a quaver, and the tie across it came out shorter
+/// than the one across the next beat.
 ///
 /// The one place slots are decided: [`natural_bar_width`] sums them and
 /// [`system_spacing`] walks them, so a bar's width and its columns cannot drift.
 fn slots(bar: &Bar, time_sig: (u8, u8), h: f32) -> Vec<f32> {
     let span = group_span(time_sig, bar);
     let onsets = onsets(bar);
+    let quaver = natural_event_width(
+        &Dur {
+            base: NoteValue::Eighth,
+            dots: 0,
+        },
+        h,
+    );
     let last = bar.events.len().saturating_sub(1);
     bar.events
         .iter()
@@ -115,7 +124,7 @@ fn slots(bar: &Bar, time_sig: (u8, u8), h: f32) -> Vec<f32> {
             if i == last {
                 w.max(BAR_LEAD_MM * h)
             } else if onsets[i + 1].is_multiple_of(span) {
-                w * (1.0 + GROUP_GAP)
+                w.max(quaver) * (1.0 + GROUP_GAP)
             } else {
                 w
             }

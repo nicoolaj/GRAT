@@ -4,6 +4,13 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.1.2] — 2026-09-25
+
+### Corrigé
+- L'espace entre deux temps est le même partout : un temps qui se termine sur une double-croche
+  (une syncope coupée au temps) est désormais aussi loin du suivant qu'un temps qui se termine
+  sur une croche. Les liaisons qui traversent ces temps ont donc la même longueur.
+
 ## [4.1.1] — 2026-09-25
 
 ### Corrigé
@@ -366,6 +373,7 @@ Première version.
 - Édition à la souris et palette d'outils.
 - Export PDF (menu, Cmd+E, `--export`), pages À propos et Aide, icône macOS, exemples.
 
+[4.1.2]: https://github.com/nicoolaj/GRAT/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/nicoolaj/GRAT/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/nicoolaj/GRAT/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/nicoolaj/GRAT/compare/v3.6.1...v4.0.0
