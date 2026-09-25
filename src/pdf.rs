@@ -15,7 +15,7 @@ use crate::model::Document;
 use crate::{staff, Align, Prim, Rgb, P, PAGE_H_MM, PAGE_W_MM};
 
 /// Render the whole document to PDF bytes: `layout::paginate` for the geometry (the
-/// same call `canvas.rs` makes every frame), then a direct `Prim` -> `Op`
+/// same call the editor makes after every change), then a direct `Prim` -> `Op`
 /// translation, one `PdfPage` per `layout::Page`.
 pub fn export(doc: &Document) -> Vec<u8> {
     // The editor's scattered one-per-beat rests and its trailing blank bars are a

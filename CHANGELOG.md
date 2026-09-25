@@ -4,6 +4,24 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.2.2] — 2026-09-25
+
+### Corrigé
+- Dans le PDF, le titre, l'auteur, les noms d'accords et tout texte centré tombent enfin au
+  centre : leur largeur était estimée comme une suite de chiffres, et « Hotel California »
+  partait 8,6 mm trop à gauche. La largeur de chaque caractère est désormais celle de la police
+  Helvetica du PDF.
+- Les caches blancs derrière `(5)`, `<12>`, `6(9)` ou `x` épousent leur texte au lieu d'effacer
+  la corde trop largement.
+
+### Modifié
+- L'éditeur ne dessine plus que les pages visibles : 0,2 ms par image au lieu de 6,6 ms pour une
+  partition de 400 mesures.
+- Surligner une plage de mesures ne ralentit plus l'affichage : une sélection en fin de longue
+  partition coûtait 43 ms par image, 0,3 ms désormais.
+- Le mode live sur une ligne ne dessine plus que la portion visible du ruban (0,3 ms par image au
+  lieu de 4,9 ms à 400 mesures).
+
 ## [4.2.1] — 2026-09-25
 
 ### Corrigé

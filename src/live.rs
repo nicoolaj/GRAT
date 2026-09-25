@@ -37,6 +37,10 @@ const FLASH_RADIUS: f32 = 24.0;
 /// Air above and below a highlighted column, so the marker covers the note and
 /// its stem instead of stopping at the outer string lines.
 const MARKER_PAD_MM: f32 = 1.6;
+/// Room kept either side of the window when the single-line view culls: a text
+/// is culled by its anchor alone, and the widest one a strip prints (a slash
+/// chord name) reaches about 10 mm either side of it.
+const CULL_MARGIN_MM: f32 = 20.0;
 /// Millimetres to pixels. Far beyond the editor's range: this is a score read at
 /// arm's length, with a guitar in the way.
 const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 3.0..=24.0;
@@ -1067,7 +1071,15 @@ fn draw_linear(
     {
         marker(painter, frame, zoom, lo, hi);
     }
-    for prim in &strip.prims {
+    // Only what the window shows: the whole piece is tens of thousands of
+    // prims, and this redraws sixty times a second. Filtering keeps their order,
+    // which is their paint order (invariant 4).
+    let left = (rect.left() - frame.left()) / zoom - CULL_MARGIN_MM;
+    let right = (rect.right() - frame.left()) / zoom + CULL_MARGIN_MM;
+    for prim in strip.prims.iter().filter(|p| {
+        let (a, b) = p.x_span();
+        b >= left && a <= right
+    }) {
         draw_prim(ctx, painter, frame, zoom, prim);
     }
     painter.line_segment(

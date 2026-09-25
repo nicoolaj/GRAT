@@ -72,6 +72,25 @@ pub enum Prim {
     },
 }
 
+impl Prim {
+    /// The x range this primitive's points reach, in millimetres. A text counts
+    /// only its anchor: a caller culling by this leaves room for the glyphs.
+    pub fn x_span(&self) -> (f32, f32) {
+        fn span(xs: impl Iterator<Item = f32>) -> (f32, f32) {
+            xs.fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), x| {
+                (lo.min(x), hi.max(x))
+            })
+        }
+        match self {
+            Prim::Line { a, b, .. } => span([a.x, b.x].into_iter()),
+            Prim::Poly { pts, .. } => span(pts.iter().map(|p| p.x)),
+            // A Bezier never leaves the hull of its four points.
+            Prim::Curve { a, c1, c2, b, .. } => span([a.x, c1.x, c2.x, b.x].into_iter()),
+            Prim::Text { pos, .. } => (pos.x, pos.x),
+        }
+    }
+}
+
 pub const PAGE_W_MM: f32 = 210.0;
 pub const PAGE_H_MM: f32 = 297.0;
 pub const MARGIN_MM: f32 = 15.0;

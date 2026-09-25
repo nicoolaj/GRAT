@@ -21,10 +21,81 @@ pub fn pt_for_cap(cap_mm: f32) -> f32 {
     cap_mm / HELVETICA_CAP / MM_PER_PT
 }
 
-/// Width of a label in millimetres. Helvetica digits all advance 0.556 em, which
-/// is exact for fret numbers and close enough for the short labels around them.
+/// Width of a label in millimetres, in Helvetica: the font the PDF prints it in,
+/// and the one `pdf.rs` centres it by. Counting every character as a digit's
+/// 0.556 em put a centred "Hotel California" 8.6 mm left of the page's middle.
 pub fn label_width(text: &str, pt: f32) -> f32 {
-    text.chars().count() as f32 * 0.556 * pt * MM_PER_PT
+    let em: u32 = text.chars().map(|c| u32::from(helvetica_advance(c))).sum();
+    em as f32 / 1000.0 * pt * MM_PER_PT
+}
+
+/// Advance width of `c` in Helvetica, in thousandths of an em: Adobe's AFM
+/// metrics for the WinAnsi characters a built-in-font PDF can print. Anything
+/// else prints as "?", which is 556 wide too -- hence the fallback.
+fn helvetica_advance(c: char) -> u16 {
+    match c {
+        '\'' => 191,
+        'i' | 'j' | 'l' | '‚' | '‘' | '’' => 222,
+        '|' | '¦' => 260,
+        ' '
+        | '!'
+        | ','
+        | '.'
+        | '/'
+        | ':'
+        | ';'
+        | 'I'
+        | '['
+        | '\\'
+        | ']'
+        | 'f'
+        | 't'
+        | '\u{a0}'
+        | '·'
+        | 'Ì'..='Ï'
+        | 'ì'..='ï' => 278,
+        '(' | ')' | '-' | '`' | 'r' | '¡' | '¨' | '\u{ad}' | '¯' | '²' | '³' | '´' | '¸' | '¹'
+        | '„' | 'ˆ' | '‹' | '›' | '˜' | '“' | '”' => 333,
+        '{' | '}' => 334,
+        '•' => 350,
+        '"' => 355,
+        'º' => 365,
+        'ª' => 370,
+        '*' => 389,
+        '°' => 400,
+        '^' => 469,
+        'J' | 'c' | 'k' | 's' | 'v' | 'x' | 'y' | 'z' | 'ç' | 'ý' | 'ÿ' | 'š' | 'ž' => 500,
+        '¶' => 537,
+        '+' | '<' | '=' | '>' | '~' | '¬' | '±' | '×' | '÷' => 584,
+        'F' | 'T' | 'Z' | '¿' | 'ß' | 'ø' | 'Ž' => 611,
+        '&'
+        | 'A'
+        | 'B'
+        | 'E'
+        | 'K'
+        | 'P'
+        | 'S'
+        | 'V'
+        | 'X'
+        | 'Y'
+        | 'À'..='Å'
+        | 'È'..='Ë'
+        | 'Ý'
+        | 'Þ'
+        | 'Š'
+        | 'Ÿ' => 667,
+        'C' | 'D' | 'H' | 'N' | 'R' | 'U' | 'w' | 'Ç' | 'Ð' | 'Ñ' | 'Ù'..='Ü' => 722,
+        '©' | '®' => 737,
+        'G' | 'O' | 'Q' | 'Ò'..='Ö' | 'Ø' => 778,
+        'M' | 'm' => 833,
+        '¼' | '½' | '¾' => 834,
+        '%' | 'æ' => 889,
+        'W' | 'œ' => 944,
+        'Æ' | 'Œ' | '…' | '‰' | '™' | '—' => 1000,
+        '@' => 1015,
+        // The digits, most of the lower case, and whatever WinAnsi cannot print.
+        _ => 556,
+    }
 }
 
 /// A time signature centred on `x`: the numerator centred on `upper_mid`, the

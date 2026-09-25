@@ -1097,3 +1097,61 @@ fn the_live_strip_puts_every_bar_on_one_line() {
         .collect();
     assert!(xs.windows(2).all(|w| w[1] > w[0]));
 }
+
+#[test]
+fn a_prims_x_span_covers_every_point_it_draws_through() {
+    use grat::{Align, Prim, Rgb, P};
+    let ink = Rgb(0, 0, 0);
+    let line = Prim::Line {
+        a: P::new(5.0, 0.0),
+        b: P::new(1.0, 9.0),
+        w: 0.2,
+        color: ink,
+    };
+    assert_eq!(line.x_span(), (1.0, 5.0));
+    // The control points count: a slur bulges past its two ends.
+    let curve = Prim::Curve {
+        a: P::new(0.0, 0.0),
+        c1: P::new(-2.0, 1.0),
+        c2: P::new(7.0, 1.0),
+        b: P::new(4.0, 0.0),
+        w: 0.2,
+        color: ink,
+    };
+    assert_eq!(curve.x_span(), (-2.0, 7.0));
+    let head = Prim::Poly {
+        pts: grat::staff::ellipse(P::new(10.0, 0.0), 1.0, 0.5, 0.0),
+        color: ink,
+    };
+    let (lo, hi) = head.x_span();
+    assert!(
+        (lo - 9.0).abs() < 1e-4 && (hi - 11.0).abs() < 1e-4,
+        "{lo} {hi}"
+    );
+    let text = Prim::Text {
+        pos: P::new(3.0, 0.0),
+        s: "Am7".into(),
+        pt: 10.0,
+        color: ink,
+        align: Align::Center,
+    };
+    assert_eq!(text.x_span(), (3.0, 3.0));
+}
+
+#[test]
+fn labels_are_measured_in_helvetica() {
+    let em = |text: &str| grat::staff::label_width(text, 1.0) / grat::staff::MM_PER_PT;
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+    // Digits keep their 0.556 em: fret numbers centre exactly as they did.
+    assert!(close(em("12"), 1.112));
+    // Counted as sixteen digits this was 8.896 em, and the PDF title sat 8.6 mm
+    // left of centre. Adobe's AFM sums it to 6.835.
+    assert!(
+        close(em("Hotel California"), 6.835),
+        "{}",
+        em("Hotel California")
+    );
+    assert!(close(em("Été"), 0.667 + 0.278 + 0.556));
+    // Past WinAnsi the PDF prints "?", 0.556 wide.
+    assert!(close(em("♯"), 0.556));
+}

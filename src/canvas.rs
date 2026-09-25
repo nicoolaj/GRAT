@@ -100,7 +100,7 @@ impl Default for EditorState {
 /// What happened this frame that the caller (the app) needs to react to.
 pub enum Action {
     /// The document was mutated: mark the file dirty. Re-pagination is the
-    /// caller's business (it already recomputes `pages` every frame).
+    /// caller's business (it repaginates once its `layout_dirty` is set).
     Changed,
 }
 
@@ -856,8 +856,19 @@ pub fn show(
             let painter = ui.painter_at(rect);
             let content_min = rect.min;
 
+            // Only the pages in view get built: all of them were, every frame --
+            // 140 000 shapes for a 400-bar piece, to show one or two pages. The
+            // margin keeps the drop shadow of a page just out of view.
+            let clip = painter.clip_rect();
+            let zoom = state.zoom;
+            let visible = |index: usize| {
+                let prect = page_rect(content_min, index, zoom);
+                prect.expand(4.0).intersects(clip).then_some(prect)
+            };
             for (index, page) in pages.iter().enumerate() {
-                let prect = page_rect(content_min, index, state.zoom);
+                let Some(prect) = visible(index) else {
+                    continue;
+                };
                 painter.rect_filled(
                     prect.translate(egui::vec2(2.0, 3.0)),
                     2.0,
@@ -886,33 +897,28 @@ pub fn show(
             }
             // A multi-event selection: every cell (every string) between the anchor
             // and the live end, lightly shaded -- the live end itself is redrawn
-            // below at full strength. Linear scan through `find_hit` per cell, same
-            // as `find_hit` already does per frame: cheap next to actually
-            // rendering the page.
+            // below at full strength. One pass over the cells of the pages in view:
+            // looking each cell up from the top of the score cost 40 ms a frame for
+            // a range near the end of a 400-bar piece.
             if let (Some(anchor), Some(sel)) = (state.range_anchor, state.selected) {
                 let (lo, hi) = event_span(anchor, sel);
-                for &(b, e) in &flat_positions(doc) {
-                    if (b, e) < lo || (b, e) > hi {
+                for (index, page) in pages.iter().enumerate() {
+                    if visible(index).is_none() {
                         continue;
                     }
-                    for string in 0..doc.tuning.len() as u8 {
-                        if let Some((index, hit)) = find_hit(
-                            pages,
-                            Sel {
-                                bar: b,
-                                event: e,
-                                string,
-                            },
-                        ) {
-                            draw_highlight(
-                                &painter,
-                                content_min,
-                                state.zoom,
-                                index,
-                                hit,
-                                ACCENT.gamma_multiply(0.3),
-                            );
-                        }
+                    for hit in page
+                        .hits
+                        .iter()
+                        .filter(|h| (lo..=hi).contains(&(h.bar, h.event)))
+                    {
+                        draw_highlight(
+                            &painter,
+                            content_min,
+                            zoom,
+                            index,
+                            hit,
+                            ACCENT.gamma_multiply(0.3),
+                        );
                     }
                 }
             }
@@ -1829,6 +1835,65 @@ mod tests {
         );
         assert_eq!(doc, bass);
         assert!(!state.clipboard.is_empty(), "the clipboard carries over");
+    }
+
+    /// How many shapes one frame of the page view paints in a 1000x720 window,
+    /// run headless. The first pass loads the fonts and sizes the scroll area.
+    fn shapes_painted(state: &mut EditorState, doc: &mut Document, pages: &[Page]) -> usize {
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1000.0, 720.0),
+            )),
+            ..Default::default()
+        };
+        let mut frame = || {
+            let mut out = ctx.run_ui(input(), |ui| {
+                show(ui, state, doc, pages);
+            });
+            // No renderer to hand the font atlas to; egui asserts it was taken.
+            out.textures_delta.clear();
+            out.shapes.len()
+        };
+        frame();
+        frame()
+    }
+
+    #[test]
+    fn only_the_pages_in_view_are_painted() {
+        let mut doc = Document::new_empty();
+        doc.bars = (0..300).map(|_| model::Bar::new_empty(None)).collect();
+        let pages = grat::layout::paginate(&doc);
+        assert!(pages.len() >= 5, "{} pages", pages.len());
+        let painted = shapes_painted(&mut EditorState::default(), &mut doc, &pages);
+        assert!(
+            painted < pages[0].prims.len() + pages[1].prims.len(),
+            "{painted} shapes for a window that shows page 1"
+        );
+    }
+
+    #[test]
+    fn a_range_shades_every_string_of_every_event_in_it() {
+        let mut doc = Document::new_empty(); // bars of four quarter rests
+        let pages = grat::layout::paginate(&doc);
+        let mut state = EditorState {
+            selected: Some(Sel {
+                bar: 1,
+                event: 3,
+                string: 2,
+            }),
+            ..Default::default()
+        };
+        let one_cell = shapes_painted(&mut state, &mut doc, &pages);
+        state.range_anchor = Some(Sel {
+            bar: 0,
+            event: 2,
+            string: 0,
+        });
+        let range = shapes_painted(&mut state, &mut doc, &pages);
+        // Bar 1's events 3 and 4, then all four of bar 2: six events, six strings.
+        assert_eq!(range - one_cell, 6 * 6);
     }
 
     #[test]

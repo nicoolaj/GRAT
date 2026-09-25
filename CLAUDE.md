@@ -107,9 +107,17 @@ never know about pages, egui or PDF.
 - `printpdf 0.12`: `default-features = false` is deliberate — the default `html` feature drags in
   `azul-layout` and `rust-fontconfig` for nothing. `ops`/`font`/`graphics`/`color`/`serialize` are
   not feature-gated.
-- Text in PDF uses `PdfFontHandle::Builtin(BuiltinFont::Helvetica)`; no font file is shipped.
-  Helvetica digits advance exactly 0.556 em, which is what `staff::label_width` uses to centre
-  fret numbers.
+- Text in PDF uses `PdfFontHandle::Builtin(BuiltinFont::Helvetica)`; no font file is shipped,
+  and printpdf ships no metrics for it either. `staff::label_width` sums Adobe's Helvetica AFM
+  advance widths (`staff::helvetica_advance`, the WinAnsi set; anything else prints as "?", 556),
+  which is what `pdf.rs` centres and right-aligns by. Digits are all 0.556 em. Checked character
+  by character against `pdftotext -bbox`, whose poppler carries the same core-14 metrics: print
+  each character as its own word and compare the word widths.
+- Egui builds a shape for every prim it is handed, whether or not it is in view, so the painters
+  cull first: the editor and the live page view by page, the live single-line view by
+  `Prim::x_span` (a text counts only its anchor, hence `live::CULL_MARGIN_MM`). Headless egui
+  (`Context::run_ui` with a `screen_rect`, then `textures_delta.clear()` before dropping the
+  output) counts painted shapes in tests.
 - **printpdf trap**: `Op::SetTextCursor` emits `Td`, which is *relative* to the previous line. Wrap
   every text item in its own `StartTextSection` / `EndTextSection` so `BT` resets the matrix and the
   first `Td` is absolute. Otherwise positions accumulate down the page.

@@ -213,7 +213,7 @@ fn tab_label(x: f32, y0: f32, staff: f32, out: &mut Vec<Prim>) {
         out.push(quad(
             x - 0.2,
             baseline - 0.05,
-            x + label_width(letter, pt) * 1.2 + 0.2, // capitals outrun a digit's 0.556 em
+            x + label_width(letter, pt) + 0.2,
             baseline + cap + 0.05,
             PAPER,
         ));
