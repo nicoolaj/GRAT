@@ -201,19 +201,104 @@ fn mutate(state: &mut EditorState, doc: &mut Document, f: impl FnOnce(&mut Docum
     f(doc);
 }
 
-/// Push an undo snapshot, then change the event under `sel`: what most editing
-/// keys and palette buttons do.
-fn edit_event(
+/// Every (bar, event) the selection covers, in order: a range, or the one cell.
+fn selected_events(state: &EditorState, doc: &Document) -> Vec<(usize, usize)> {
+    let Some(sel) = state.selected else {
+        return Vec::new();
+    };
+    let (lo, hi) = event_span(state.range_anchor.unwrap_or(sel), sel);
+    flat_positions(doc)
+        .into_iter()
+        .filter(|p| (lo..=hi).contains(p))
+        .collect()
+}
+
+/// Push an undo snapshot, then change every event the selection covers -- what
+/// the editing keys and the palette's buttons do, to a range as to one cell.
+/// False when nothing is selected.
+fn edit_events(
     state: &mut EditorState,
     doc: &mut Document,
-    sel: Sel,
-    f: impl FnOnce(&mut model::Event),
-) {
+    mut f: impl FnMut(&mut model::Event),
+) -> bool {
+    let cells = selected_events(state, doc);
+    if cells.is_empty() {
+        return false;
+    }
     mutate(state, doc, |doc| {
-        if let Some(event) = sel.event_mut(doc) {
-            f(event);
+        for (bar, event) in cells {
+            if let Some(e) = doc.bars.get_mut(bar).and_then(|b| b.events.get_mut(event)) {
+                f(e);
+            }
         }
     });
+    true
+}
+
+/// Whether every event the selection covers passes `test` -- what a checkbox
+/// standing for a whole range shows.
+fn all_selected(state: &EditorState, doc: &Document, test: impl Fn(&model::Event) -> bool) -> bool {
+    let cells = selected_events(state, doc);
+    !cells.is_empty() && cells.iter().all(|&(b, e)| test(&doc.bars[b].events[e]))
+}
+
+/// Arm `tech` for the notes typed next, and set it on the selection: every note
+/// of a range, or the selected cell's own note. True when the document changed.
+fn apply_technique(state: &mut EditorState, doc: &mut Document, tech: Technique) -> bool {
+    state.tool_tech = tech;
+    if state.range_anchor.is_some() {
+        return edit_events(state, doc, |e| {
+            e.notes.iter_mut().for_each(|n| n.tech = tech)
+        });
+    }
+    let Some(sel) = state.selected.filter(|sel| sel.note(doc).is_some()) else {
+        return false;
+    };
+    mutate(state, doc, |doc| {
+        if let Some(note) = sel.note_mut(doc) {
+            note.tech = tech;
+        }
+    });
+    true
+}
+
+/// Select every event of the piece (Cmd+A), without scrolling to its end.
+pub fn select_all(state: &mut EditorState, doc: &Document) {
+    let positions = flat_positions(doc);
+    let (Some(&(b0, e0)), Some(&(b1, e1))) = (positions.first(), positions.last()) else {
+        return;
+    };
+    let string = state.selected.map_or(0, |s| s.string);
+    state.range_anchor = Some(Sel {
+        bar: b0,
+        event: e0,
+        string,
+    });
+    set_sel(
+        state,
+        Some(Sel {
+            bar: b1,
+            event: e1,
+            string,
+        }),
+    );
+    state.scroll_to_sel = false;
+}
+
+/// Transpose the selection by `semitones` as one undo step: `None` with nothing
+/// selected, `Some(false)` -- and nothing done -- when a note would leave the
+/// fretboard (see `Document::transpose`).
+pub fn transpose(state: &mut EditorState, doc: &mut Document, semitones: i32) -> Option<bool> {
+    let cells = selected_events(state, doc);
+    if cells.is_empty() {
+        return None;
+    }
+    let mut moved = doc.clone();
+    if !moved.transpose(&cells, semitones) {
+        return Some(false);
+    }
+    mutate(state, doc, |doc| *doc = moved);
+    Some(true)
 }
 
 /// Swap in another document (New, Open). The selection, the fret being typed
@@ -1143,11 +1228,13 @@ pub fn show(
                             pressed: true,
                             ..
                         } => {
-                            if let Some(sel) = state.selected {
-                                edit_event(state, doc, sel, |e| {
-                                    e.notes.retain(|n| n.string != sel.string)
-                                });
-                                action = Some(Action::Changed);
+                            // The cursor's string, across the whole selection.
+                            if let Some(string) = state.selected.map(|s| s.string) {
+                                if edit_events(state, doc, |e| {
+                                    e.notes.retain(|n| n.string != string)
+                                }) {
+                                    action = Some(Action::Changed);
+                                }
                             }
                         }
                         egui::Event::Key {
@@ -1155,8 +1242,7 @@ pub fn show(
                             pressed: true,
                             ..
                         } => {
-                            if let Some(sel) = state.selected {
-                                edit_event(state, doc, sel, |e| e.notes.clear());
+                            if edit_events(state, doc, |e| e.notes.clear()) {
                                 action = Some(Action::Changed);
                             }
                         }
@@ -1362,16 +1448,8 @@ fn tech_button(
         }
     };
 
-    if resp.clicked() {
-        state.tool_tech = tech;
-        if let Some(sel) = state.selected.filter(|sel| sel.note(doc).is_some()) {
-            mutate(state, doc, |doc| {
-                if let Some(note) = sel.note_mut(doc) {
-                    note.tech = tech;
-                }
-            });
-            *action = Some(Action::Changed);
-        }
+    if resp.clicked() && apply_technique(state, doc, tech) {
+        *action = Some(Action::Changed);
     }
 }
 
@@ -1578,11 +1656,9 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
     if ui
         .add_enabled(sel.is_some(), egui::Button::new(t("tool.rest")))
         .clicked()
+        && edit_events(state, doc, |e| e.notes.clear())
     {
-        if let Some(sel) = sel {
-            edit_event(state, doc, sel, |e| e.notes.clear());
-            action = Some(Action::Changed);
-        }
+        action = Some(Action::Changed);
     }
 
     ui.separator();
@@ -1603,35 +1679,26 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
             .add_enabled(sel.is_some(), egui::Button::new(t(key)))
             .clicked()
         {
-            if let Some(sel) = sel {
-                edit_event(state, doc, sel, |e| {
-                    e.strum = if e.strum == Some(strum) {
-                        None
-                    } else {
-                        Some(strum)
-                    };
-                });
+            // On for every event of the selection, or, where all have it, off.
+            let all = all_selected(state, doc, |e| e.strum == Some(strum));
+            if edit_events(state, doc, |e| e.strum = (!all).then_some(strum)) {
                 action = Some(Action::Changed);
             }
         }
     }
 
     ui.separator();
-    let (mut palm_mute, mut let_ring) = sel
-        .and_then(|s| s.event(doc))
-        .map(|e| (e.palm_mute, e.let_ring))
-        .unwrap_or((false, false));
+    let mut palm_mute = all_selected(state, doc, |e| e.palm_mute);
+    let mut let_ring = all_selected(state, doc, |e| e.let_ring);
     if ui
         .add_enabled(
             sel.is_some(),
             egui::Checkbox::new(&mut palm_mute, t("tech.palm_mute")),
         )
         .changed()
+        && edit_events(state, doc, |e| e.palm_mute = palm_mute)
     {
-        if let Some(sel) = sel {
-            edit_event(state, doc, sel, |e| e.palm_mute = palm_mute);
-            action = Some(Action::Changed);
-        }
+        action = Some(Action::Changed);
     }
     if ui
         .add_enabled(
@@ -1639,11 +1706,9 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
             egui::Checkbox::new(&mut let_ring, t("tech.let_ring")),
         )
         .changed()
+        && edit_events(state, doc, |e| e.let_ring = let_ring)
     {
-        if let Some(sel) = sel {
-            edit_event(state, doc, sel, |e| e.let_ring = let_ring);
-            action = Some(Action::Changed);
-        }
+        action = Some(Action::Changed);
     }
 
     ui.separator();
@@ -2041,6 +2106,94 @@ mod tests {
         assert!(is_convex(&head));
         let beam = [(0.0, 0.0), (8.0, 1.0), (8.0, 2.2), (0.0, 1.2)].map(|(x, y)| egui::pos2(x, y));
         assert!(is_convex(&beam));
+    }
+
+    /// A new piece with a note on every event of its first two bars, and a
+    /// selection from bar 1's first beat to bar 2's second.
+    fn range_of_notes() -> (EditorState, Document) {
+        let mut doc = Document::new_empty();
+        for event in doc.bars[..2].iter_mut().flat_map(|b| &mut b.events) {
+            event.notes.push(model::Note {
+                string: 1,
+                fret: 5,
+                tech: Technique::Plain,
+                tie_next: false,
+            });
+        }
+        let cell = |bar, event| Sel {
+            bar,
+            event,
+            string: 1,
+        };
+        let state = EditorState {
+            selected: Some(cell(1, 1)),
+            range_anchor: Some(cell(0, 0)),
+            ..Default::default()
+        };
+        (state, doc)
+    }
+
+    #[test]
+    fn a_range_takes_palm_mute_strums_and_techniques_all_at_once() {
+        let (mut state, mut doc) = range_of_notes();
+        let in_range = |doc: &Document| -> Vec<model::Event> {
+            doc.bars[0]
+                .events
+                .iter()
+                .chain(&doc.bars[1].events[..2])
+                .cloned()
+                .collect()
+        };
+        assert!(edit_events(&mut state, &mut doc, |e| e.palm_mute = true));
+        assert!(in_range(&doc).iter().all(|e| e.palm_mute));
+        assert!(
+            !doc.bars[1].events[2].palm_mute,
+            "the range stops at its end"
+        );
+        assert!(all_selected(&state, &doc, |e| e.palm_mute));
+
+        // A strum goes on everywhere, then, clicked again, off everywhere.
+        for want in [Some(Strum::Down), None] {
+            let all = all_selected(&state, &doc, |e| e.strum == Some(Strum::Down));
+            edit_events(&mut state, &mut doc, |e| {
+                e.strum = (!all).then_some(Strum::Down)
+            });
+            assert!(in_range(&doc).iter().all(|e| e.strum == want));
+        }
+
+        assert!(apply_technique(&mut state, &mut doc, Technique::Vibrato));
+        assert!(in_range(&doc)
+            .iter()
+            .all(|e| e.notes[0].tech == Technique::Vibrato));
+        assert_eq!(doc.bars[1].events[2].notes[0].tech, Technique::Plain);
+
+        // A lone empty cell only arms the technique.
+        state.range_anchor = None;
+        state.selected = Some(Sel {
+            bar: 3,
+            event: 0,
+            string: 0,
+        });
+        assert!(!apply_technique(&mut state, &mut doc, Technique::HammerOn));
+        assert_eq!(state.tool_tech, Technique::HammerOn);
+    }
+
+    #[test]
+    fn select_all_then_transpose_is_one_undo_step() {
+        let (mut state, mut doc) = range_of_notes();
+        select_all(&mut state, &doc);
+        let last = doc.bars.len() - 1;
+        assert_eq!(state.range_anchor.map(|s| (s.bar, s.event)), Some((0, 0)));
+        assert_eq!(state.selected.map(|s| (s.bar, s.event)), Some((last, 3)));
+
+        let before = doc.clone();
+        assert_eq!(transpose(&mut state, &mut doc, 2), Some(true));
+        assert!(doc.bars[1].events.iter().all(|e| e.notes[0].fret == 7));
+        assert!(undo(&mut state, &mut doc));
+        assert_eq!(doc, before);
+
+        state.selected = None;
+        assert_eq!(transpose(&mut state, &mut doc, 2), None, "nothing selected");
     }
 
     #[test]

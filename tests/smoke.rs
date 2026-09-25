@@ -1336,3 +1336,29 @@ fn duplicated_bars_keep_their_metre_but_not_their_repeats() {
     assert!(!doc.bars[3].repeat_start && doc.bars[4].repeat_end.is_none());
     assert!(doc.bars[1].repeat_start && doc.bars[2].repeat_end == Some(2));
 }
+
+#[test]
+fn transposing_keeps_a_note_on_its_string_where_it_can() {
+    let mut doc = one_event(&[(0, 3), (5, 2)]);
+    assert!(doc.transpose(&[(0, 0)], 2));
+    assert_eq!(frets(&doc), [(0, 5), (5, 4)]);
+
+    // Down from the open B string: onto the G string, which still reaches it.
+    let mut doc = one_event(&[(1, 0)]);
+    assert!(doc.transpose(&[(0, 0)], -1));
+    assert_eq!(frets(&doc), [(2, 3)]);
+
+    // Nothing below the low E: refused, and nothing moved, not even the other note.
+    let mut doc = one_event(&[(0, 3), (5, 0)]);
+    assert!(!doc.transpose(&[(0, 0)], -1));
+    assert_eq!(doc, one_event(&[(0, 3), (5, 0)]));
+
+    // A slide-in's departure and a trill's second fret go with their note.
+    let mut doc = one_event(&[(2, 5), (3, 7)]);
+    doc.bars[0].events[0].notes[0].tech = Technique::SlideIn { from_fret: 3 };
+    doc.bars[0].events[0].notes[1].tech = Technique::Trill { to_fret: 9 };
+    assert!(doc.transpose(&[(0, 0)], 1));
+    let notes = &doc.bars[0].events[0].notes;
+    assert_eq!(notes[0].tech, Technique::SlideIn { from_fret: 4 });
+    assert_eq!(notes[1].tech, Technique::Trill { to_fret: 10 });
+}

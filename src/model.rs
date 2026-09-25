@@ -679,6 +679,50 @@ fn default_scale() -> f32 {
     1.0
 }
 
+/// Re-fret an event's `notes` onto `tuning` so each sounds `pitch(note)` (open
+/// string plus fret, capo aside): on its own string when that reaches the pitch
+/// within [`MAX_FRET`], otherwise on the nearest free string that does. A
+/// slide-in's departure fret and a trill's second fret move with their note.
+/// Returns the placed notes, in string order, and how many no string could play.
+///
+/// ponytail: greedy, one note at a time in string order, not an optimal
+/// assignment of a chord to strings, and a tie or legato pair can split across
+/// two strings. A matching over each event's notes if a real voicing ever
+/// comes out wrong.
+fn refret(notes: Vec<Note>, pitch: impl Fn(&Note) -> i32, tuning: &[u8]) -> (Vec<Note>, usize) {
+    let mut placed: Vec<Note> = Vec::with_capacity(notes.len());
+    let mut lost = 0;
+    for mut note in notes {
+        let pitch = pitch(&note);
+        let from = i32::from(note.string);
+        let mut order: Vec<usize> = (0..tuning.len()).collect();
+        order.sort_by_key(|&s| (s as i32 - from).abs());
+        let Some(s) = order.into_iter().find(|&s| {
+            (0..=MAX_FRET).contains(&(pitch - i32::from(tuning[s])))
+                && !placed.iter().any(|p| p.string as usize == s)
+        }) else {
+            lost += 1;
+            continue;
+        };
+        let fret = pitch - i32::from(tuning[s]);
+        let shift = |f: u8| (i32::from(f) + fret - i32::from(note.fret)).clamp(0, MAX_FRET) as u8;
+        note.tech = match note.tech {
+            Technique::SlideIn { from_fret } => Technique::SlideIn {
+                from_fret: shift(from_fret),
+            },
+            Technique::Trill { to_fret } => Technique::Trill {
+                to_fret: shift(to_fret),
+            },
+            other => other,
+        };
+        note.string = s as u8;
+        note.fret = fret as u8;
+        placed.push(note);
+    }
+    placed.sort_by_key(|n| n.string);
+    (placed, lost)
+}
+
 impl Document {
     /// Parse a `.gtab`'s JSON, refusing a file written by a newer format than
     /// this build understands.
@@ -782,14 +826,8 @@ impl Document {
     /// With `keep_pitches` false the tablature stays as written: every note keeps
     /// its string and fret, and so sounds whatever the new tuning makes of it;
     /// notes on strings that no longer exist are dropped. With `keep_pitches` true
-    /// every note is re-fretted to sound as before, on its own string when that
-    /// still reaches the pitch within [`MAX_FRET`], otherwise on the nearest free
-    /// string that does; a note no string can play is dropped.
-    ///
-    /// ponytail: greedy, one note at a time in string order, not an optimal
-    /// assignment of a chord to strings, and a tie or legato pair can split across
-    /// two strings. A matching over each event's notes if a real voicing ever
-    /// comes out wrong.
+    /// every note is re-fretted by [`refret`] to sound as before; a note no string
+    /// can play is dropped.
     pub fn retune(&mut self, instrument: Instrument, tuning: Vec<u8>, keep_pitches: bool) {
         let old = std::mem::replace(&mut self.tuning, tuning);
         self.instrument = instrument;
@@ -799,37 +837,40 @@ impl Document {
                 event.notes.retain(|n| (n.string as usize) < strings);
                 continue;
             }
-            let mut placed: Vec<Note> = Vec::with_capacity(event.notes.len());
-            for mut note in std::mem::take(&mut event.notes) {
-                let pitch = i32::from(old[note.string as usize]) + i32::from(note.fret);
-                let from = i32::from(note.string);
-                let mut order: Vec<usize> = (0..strings).collect();
-                order.sort_by_key(|&s| (s as i32 - from).abs());
-                let Some(s) = order.into_iter().find(|&s| {
-                    (0..=MAX_FRET).contains(&(pitch - i32::from(self.tuning[s])))
-                        && !placed.iter().any(|p| p.string as usize == s)
-                }) else {
-                    continue;
-                };
-                let fret = pitch - i32::from(self.tuning[s]);
-                let shift =
-                    |f: u8| (i32::from(f) + fret - i32::from(note.fret)).clamp(0, MAX_FRET) as u8;
-                note.tech = match note.tech {
-                    Technique::SlideIn { from_fret } => Technique::SlideIn {
-                        from_fret: shift(from_fret),
-                    },
-                    Technique::Trill { to_fret } => Technique::Trill {
-                        to_fret: shift(to_fret),
-                    },
-                    other => other,
-                };
-                note.string = s as u8;
-                note.fret = fret as u8;
-                placed.push(note);
-            }
-            placed.sort_by_key(|n| n.string);
-            event.notes = placed;
+            let notes = std::mem::take(&mut event.notes);
+            let pitch = |n: &Note| i32::from(old[n.string as usize]) + i32::from(n.fret);
+            event.notes = refret(notes, pitch, &self.tuning).0;
         }
+    }
+
+    /// Transpose the events at `cells`, as (bar, event), by `semitones`, each
+    /// note re-fretted the way [`refret`] does. All or nothing: `false`, and the
+    /// document untouched, when some note would leave the fretboard -- a
+    /// transposition that quietly lost a note would be worse than none.
+    pub fn transpose(&mut self, cells: &[(usize, usize)], semitones: i32) -> bool {
+        let mut moved = Vec::with_capacity(cells.len());
+        for &(bar, event) in cells {
+            let Some(notes) = self
+                .bars
+                .get(bar)
+                .and_then(|b| b.events.get(event))
+                .map(|e| &e.notes)
+            else {
+                continue;
+            };
+            let pitch = |n: &Note| {
+                i32::from(self.tuning[n.string as usize]) + i32::from(n.fret) + semitones
+            };
+            let (notes, lost) = refret(notes.clone(), pitch, &self.tuning);
+            if lost > 0 {
+                return false;
+            }
+            moved.push((bar, event, notes));
+        }
+        for (bar, event, notes) in moved {
+            self.bars[bar].events[event].notes = notes;
+        }
+        true
     }
 
     /// Time signature in effect at `bar_index`, resolving inheritance from earlier bars.

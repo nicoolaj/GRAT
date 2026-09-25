@@ -4,6 +4,20 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.7.0] — 2026-09-26
+
+### Ajouté
+- Une plage sélectionnée (Maj + clic) reçoit d'un coup, en une seule étape d'annulation :
+  - les techniques de la palette, sur toutes ses notes ;
+  - les coups de médiator (posés partout, ou retirés partout s'ils y sont déjà) ;
+  - le palm mute et le laisser sonner (les cases reflètent toute la plage) ;
+  - Silence et Espace (effacer), Retour arrière (les notes de la corde du curseur).
+- Transposer la sélection d'un demi-ton (⌥↑ / ⌥↓, ou le menu Édition). Chaque note garde sa corde
+  quand elle le peut, sinon passe à la corde voisine qui la joue ; le départ d'un slide d'approche
+  et la seconde note d'un trille suivent. Si une note sortait du manche, rien n'est transposé et
+  un message le dit.
+- Tout sélectionner (Cmd+A, menu Édition), par exemple pour transposer tout le morceau.
+
 ## [4.6.1] — 2026-09-26
 
 ### Modifié

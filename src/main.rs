@@ -35,6 +35,12 @@ const SHORTCUT_CUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::X);
 const SHORTCUT_PASTE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::V);
+const SHORTCUT_SELECT_ALL: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::A);
+const SHORTCUT_TRANSPOSE_UP: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::ArrowUp);
+const SHORTCUT_TRANSPOSE_DOWN: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::ArrowDown);
 const SHORTCUT_REPEAT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R);
 const SHORTCUT_LIVE: egui::KeyboardShortcut =
@@ -492,6 +498,19 @@ impl TablaturesApp {
         }
     }
 
+    /// Transpose the selection, or say why it could not be.
+    fn transpose(&mut self, semitones: i32) {
+        match canvas::transpose(&mut self.editor, &mut self.doc, semitones) {
+            Some(true) => {
+                self.dirty = true;
+                self.layout_dirty = true;
+                self.status_msg = None;
+            }
+            Some(false) => self.status_msg = Some(t("error.transpose")),
+            None => {}
+        }
+    }
+
     /// Retune straight away when no written note would move or sound different;
     /// otherwise ask first whether to keep the frets or the pitches.
     fn request_retune(&mut self, instrument: Instrument, tuning: Vec<u8>) {
@@ -814,6 +833,28 @@ impl TablaturesApp {
                             self.layout_dirty = true;
                         }
                         ui.close();
+                    }
+                    let sc = ui.ctx().format_shortcut(&SHORTCUT_SELECT_ALL);
+                    if ui
+                        .add(egui::Button::new(t("menu.select_all")).shortcut_text(sc))
+                        .clicked()
+                    {
+                        canvas::select_all(&mut self.editor, &self.doc);
+                        ui.close();
+                    }
+                    ui.separator();
+                    for (key, sc, semitones) in [
+                        ("menu.transpose_up", &SHORTCUT_TRANSPOSE_UP, 1),
+                        ("menu.transpose_down", &SHORTCUT_TRANSPOSE_DOWN, -1),
+                    ] {
+                        let sc = ui.ctx().format_shortcut(sc);
+                        if ui
+                            .add_enabled(has_sel, egui::Button::new(t(key)).shortcut_text(sc))
+                            .clicked()
+                        {
+                            self.transpose(semitones);
+                            ui.close();
+                        }
                     }
                     ui.separator();
                     // Input mode: whether an explicit duration change pushes the
@@ -1217,6 +1258,19 @@ impl eframe::App for TablaturesApp {
                 self.layout_dirty = true;
             }
         }
+        // Cmd+A stays the text fields' own while one has the focus.
+        if !ui.ctx().text_edit_focused()
+            && ui
+                .ctx()
+                .input_mut(|i| i.consume_shortcut(&SHORTCUT_SELECT_ALL))
+        {
+            canvas::select_all(&mut self.editor, &self.doc);
+        }
+        for (sc, semitones) in [(&SHORTCUT_TRANSPOSE_UP, 1), (&SHORTCUT_TRANSPOSE_DOWN, -1)] {
+            if ui.ctx().input_mut(|i| i.consume_shortcut(sc)) {
+                self.transpose(semitones);
+            }
+        }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_REPEAT))
             && canvas::repeat_selection(&mut self.editor, &mut self.doc)
         {
@@ -1428,6 +1482,9 @@ impl eframe::App for TablaturesApp {
                     ("menu.copy", &SHORTCUT_COPY),
                     ("menu.cut", &SHORTCUT_CUT),
                     ("menu.paste", &SHORTCUT_PASTE),
+                    ("menu.select_all", &SHORTCUT_SELECT_ALL),
+                    ("menu.transpose_up", &SHORTCUT_TRANSPOSE_UP),
+                    ("menu.transpose_down", &SHORTCUT_TRANSPOSE_DOWN),
                     ("menu.repeat_selection", &SHORTCUT_REPEAT),
                     ("menu.live", &SHORTCUT_LIVE),
                     ("menu.quit", &SHORTCUT_QUIT),
@@ -1764,6 +1821,9 @@ mod tests {
         let menu = shot.text(&t("menu.bar"));
         shot.click(menu, egui::PointerButton::Primary, egui::Modifiers::NONE);
         shot.shoot("bar-menu");
+        let menu = shot.text(&t("menu.edit"));
+        shot.click(menu, egui::PointerButton::Primary, egui::Modifiers::NONE);
+        shot.shoot("edit-menu");
         shot.frame(vec![egui::Event::Key {
             key: egui::Key::Escape,
             physical_key: None,
