@@ -230,11 +230,7 @@ pub(crate) fn paint_decoration(
                     .iter()
                     .map(|&(x, y)| center + egui::vec2(x, y) * radius)
                     .collect();
-                painter.add(egui::Shape::convex_polygon(
-                    points,
-                    rgb(*color),
-                    egui::Stroke::NONE,
-                ));
+                fill_polygon(painter, points, rgb(*color));
             }
             grat::decorations::Shape::Line { a, b, w, color } => {
                 painter.line_segment(
@@ -343,11 +339,7 @@ pub(crate) fn draw_prim(
         Prim::Poly { pts, color } => {
             let points: Vec<egui::Pos2> =
                 pts.iter().map(|p| to_screen(page_rect, zoom, *p)).collect();
-            painter.add(egui::Shape::convex_polygon(
-                points,
-                rgb(*color),
-                egui::Stroke::NONE,
-            ));
+            fill_polygon(painter, points, rgb(*color));
         }
         Prim::Curve {
             a,
@@ -389,6 +381,93 @@ pub(crate) fn draw_prim(
             );
         }
     }
+}
+
+/// Fill an outline the way the PDF fills a `Prim::Poly`, whatever its shape.
+/// epaint fills any polygon as a fan from its first point, which assumes it is
+/// convex: right for a note head or a beam, but it filled a flag's curl into a
+/// solid sail. A concave outline is cut into triangles here instead, and edged
+/// with a hairline for the anti-aliasing a bare mesh does not get.
+fn fill_polygon(painter: &egui::Painter, points: Vec<egui::Pos2>, color: egui::Color32) {
+    if is_convex(&points) {
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            color,
+            egui::Stroke::NONE,
+        ));
+        return;
+    }
+    let mut mesh = egui::Mesh::default();
+    for &p in &points {
+        mesh.colored_vertex(p, color);
+    }
+    for [a, b, c] in triangulate(&points) {
+        mesh.add_triangle(a as u32, b as u32, c as u32);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+    painter.add(egui::Shape::closed_line(
+        points,
+        egui::Stroke::new(0.5, color),
+    ));
+}
+
+/// z of the cross product of `a -> b` and `a -> c`: positive when `c` lies to
+/// the left of `a -> b` (y down on screen, so a counter-clockwise turn).
+fn turn(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2) -> f32 {
+    (b - a).x * (c - a).y - (b - a).y * (c - a).x
+}
+
+/// Whether every corner of the outline turns the same way.
+fn is_convex(pts: &[egui::Pos2]) -> bool {
+    let n = pts.len();
+    let turns = (0..n).map(|i| turn(pts[i], pts[(i + 1) % n], pts[(i + 2) % n]));
+    let (mut left, mut right) = (false, false);
+    for t in turns {
+        left |= t > 1e-6;
+        right |= t < -1e-6;
+    }
+    !(left && right)
+}
+
+/// Triangles (indices into `pts`) exactly covering a simple outline -- one no
+/// edge of which crosses another -- by ear clipping: O(n²), and a flag has 34
+/// points.
+fn triangulate(pts: &[egui::Pos2]) -> Vec<[usize; 3]> {
+    // Twice the signed area: which way the outline winds, so that a corner
+    // turning with it is convex whichever way that is.
+    let n = pts.len();
+    let wind: f32 = (0..n)
+        .map(|i| pts[i].x * pts[(i + 1) % n].y - pts[(i + 1) % n].x * pts[i].y)
+        .sum();
+    let mut left: Vec<usize> = (0..n).collect();
+    let mut out = Vec::with_capacity(n.saturating_sub(2));
+    while left.len() > 3 {
+        let m = left.len();
+        let corner = |i: usize| [left[(i + m - 1) % m], left[i], left[(i + 1) % m]];
+        let is_ear = |i: usize| {
+            let [a, b, c] = corner(i);
+            let (pa, pb, pc) = (pts[a], pts[b], pts[c]);
+            turn(pa, pb, pc) * wind > 0.0
+                && left.iter().all(|&j| {
+                    let p = pts[j];
+                    j == a
+                        || j == b
+                        || j == c
+                        || turn(pa, pb, p) * wind < 0.0
+                        || turn(pb, pc, p) * wind < 0.0
+                        || turn(pc, pa, p) * wind < 0.0
+                })
+        };
+        // An outline folding back on itself can leave no clean ear; clipping
+        // a corner anyway still ends the loop, where waiting for one would not.
+        let i = (0..m).find(|&i| is_ear(i)).unwrap_or(0);
+        out.push(corner(i));
+        left.remove(i);
+    }
+    if let [a, b, c] = left[..] {
+        out.push([a, b, c]);
+    }
+    out
 }
 
 /// Screen rect of the page at `index`, given the scroll content's top-left.
@@ -1894,6 +1973,88 @@ mod tests {
         let range = shapes_painted(&mut state, &mut doc, &pages);
         // Bar 1's events 3 and 4, then all four of bar 2: six events, six strings.
         assert_eq!(range - one_cell, 6 * 6);
+    }
+
+    fn area(pts: &[egui::Pos2]) -> f32 {
+        let n = pts.len();
+        (0..n)
+            .map(|i| pts[i].x * pts[(i + 1) % n].y - pts[(i + 1) % n].x * pts[i].y)
+            .sum::<f32>()
+            .abs()
+            / 2.0
+    }
+
+    /// Every outline the screen fills that is not a plain quad or a head: the
+    /// staff's flags, and each calendar decoration's shapes.
+    fn outlines() -> Vec<Vec<egui::Pos2>> {
+        let mut doc = Document::new_empty();
+        doc.rows = vec![model::Row::Tab, model::Row::Notation];
+        let bar = &mut doc.bars[0];
+        for (i, base) in [(0, NoteValue::Eighth), (2, NoteValue::Sixteenth)] {
+            engrave::set_event_dur(bar, (4, 4), i, model::Dur { base, dots: 0 });
+            bar.events[i].notes.push(model::Note {
+                string: 0,
+                fret: 3,
+                tech: Technique::Plain,
+                tie_next: false,
+            });
+        }
+        let pos = |x: f32, y: f32| egui::pos2(x, -y);
+        let flags = grat::layout::paginate(&doc).remove(0).prims.into_iter();
+        let flags = flags.filter_map(|p| match p {
+            Prim::Poly { pts, .. } if pts.len() > 20 => {
+                Some(pts.iter().map(|p| pos(p.x, p.y)).collect())
+            }
+            _ => None,
+        });
+        let decorations = grat::decorations::DECORATED_DATES
+            .iter()
+            .filter_map(|&(m, d)| grat::decorations::decoration_for(m, d))
+            .flat_map(|deco| deco.shapes)
+            .filter_map(|s| match s {
+                grat::decorations::Shape::Poly { pts, .. } => {
+                    Some(pts.iter().map(|&(x, y)| pos(x, y)).collect())
+                }
+                _ => None,
+            });
+        flags.chain(decorations).collect()
+    }
+
+    #[test]
+    fn a_concave_outline_is_filled_exactly_not_fanned() {
+        let outlines = outlines();
+        let concave: Vec<_> = outlines.iter().filter(|o| !is_convex(o)).collect();
+        assert!(concave.len() >= 3, "the flags, at least, are concave");
+        for pts in &outlines {
+            let covered: f32 = triangulate(pts)
+                .iter()
+                .map(|&[a, b, c]| area(&[pts[a], pts[b], pts[c]]))
+                .sum();
+            let want = area(pts);
+            assert!(
+                (covered - want).abs() <= want * 1e-3,
+                "{} points: triangles cover {covered}, the outline {want}",
+                pts.len()
+            );
+        }
+        // What epaint's fan from the first point covered instead.
+        let fan: f32 = (1..concave[0].len() - 1)
+            .map(|i| area(&[concave[0][0], concave[0][i], concave[0][i + 1]]))
+            .sum();
+        assert!(
+            fan > area(concave[0]) * 1.2,
+            "{fan} vs {}",
+            area(concave[0])
+        );
+    }
+
+    #[test]
+    fn note_heads_and_beams_keep_the_convex_fill() {
+        let head = staff::ellipse(grat::P::new(10.0, 5.0), 1.6, 1.2, -21.0);
+        let head: Vec<_> = head.iter().map(|p| egui::pos2(p.x, -p.y)).collect();
+        assert!(is_convex(&head));
+        let beam = [(0.0, 0.0), (8.0, 1.0), (8.0, 2.2), (0.0, 1.2)].map(|(x, y)| egui::pos2(x, y));
+        assert!(is_convex(&beam));
     }
 
     #[test]

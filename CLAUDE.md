@@ -118,6 +118,13 @@ never know about pages, egui or PDF.
   `Prim::x_span` (a text counts only its anchor, hence `live::CULL_MARGIN_MM`). Headless egui
   (`Context::run_ui` with a `screen_rect`, then `textures_delta.clear()` before dropping the
   output) counts painted shapes in tests.
+- **epaint fills only convex polygons.** `Shape::convex_polygon` (and a filled `PathShape`) is
+  tessellated as a fan from the first point (`epaint` 0.36 `tessellator.rs`, `fill_closed_path`),
+  so a concave outline comes out wrong: a flag's curl filled into a solid sail, three times its
+  area. The PDF fills the same `Prim::Poly` with the non-zero rule, correctly. `canvas::fill_polygon`
+  is the one screen path for every `Prim::Poly` and decoration polygon: convex ones keep
+  `convex_polygon` (anti-aliased), concave ones are ear-clipped into a `Mesh` edged with a 0.5-pt
+  hairline. Checked by rasterising `Context::tessellate`'s triangles offline.
 - **printpdf trap**: `Op::SetTextCursor` emits `Td`, which is *relative* to the previous line. Wrap
   every text item in its own `StartTextSection` / `EndTextSection` so `BT` resets the matrix and the
   first `Td` is absolute. Otherwise positions accumulate down the page.

@@ -90,6 +90,16 @@ fn fret_label(note: &Note) -> String {
     }
 }
 
+/// Point size of a note's fret label, at fret-digit height `cap`: a grace note
+/// prints smaller.
+fn fret_pt(note: &Note, cap: f32) -> f32 {
+    pt_for_cap(if matches!(note.tech, Technique::Grace) {
+        cap * 0.72
+    } else {
+        cap
+    })
+}
+
 /// How much of a tone a bend is worth, written the way players read it.
 fn bend_label(quarters: u8) -> String {
     match quarters {
@@ -340,8 +350,7 @@ fn render_bar(
                 }
             }
 
-            let grace = matches!(note.tech, Technique::Grace);
-            let pt = pt_for_cap(if grace { cap * 0.72 } else { cap });
+            let pt = fret_pt(note, cap);
             let text = fret_label(note);
             let w = label_width(&text, pt);
             let color = technique_color(&note.tech);
@@ -407,15 +416,20 @@ fn technique(
     let color = technique_color(&note.tech);
     let sc = |mm: f32| mm * scale;
     let right = x + w * 0.5 + sc(0.5);
-    // Where the partner note sits, for the techniques that join two notes.
-    let partner = |out_fret: &mut Option<u8>| -> Option<f32> {
+    // For the techniques that join two notes: where the stroke to the partner
+    // stops, short of the partner's own label, and the partner's fret. Its
+    // width, not this note's: in "5h12" the slur used to run into the "12".
+    let partner = || -> Option<(f32, u8)> {
         let j = bar.next_on_string(ei, note.string)?;
-        *out_fret = bar.events[j]
+        let other = bar.events[j]
             .notes
             .iter()
-            .find(|n| n.string == note.string)
-            .map(|n| n.fret);
-        layout.events.get(j).map(|&ex| origin.x + ex)
+            .find(|n| n.string == note.string)?;
+        let half = label_width(&fret_label(other), fret_pt(other, sc(FRET_CAP_MM))) * 0.5;
+        Some((
+            origin.x + layout.events.get(j)? - half - sc(0.5),
+            other.fret,
+        ))
     };
 
     match note.tech {
@@ -423,22 +437,19 @@ fn technique(
 
         // A slur above the pair, with the letter players look for.
         Technique::HammerOn | Technique::PullOff => {
-            let mut fret = None;
-            if let Some(nx) = partner(&mut fret) {
+            if let Some((end, _)) = partner() {
                 let lift = y + sc(FRET_CAP_MM * 0.8);
                 out.push(arc(
                     P { x: right, y: lift },
-                    P {
-                        x: nx - w * 0.5 - sc(0.5),
-                        y: lift,
-                    },
+                    P { x: end, y: lift },
                     sc(1.7),
                     sc(0.22),
                     color,
                 ));
+                // Over the top of the arc, wherever the two labels' widths put it.
                 out.push(Prim::Text {
                     pos: P {
-                        x: (right + nx) * 0.5,
+                        x: (right + end) * 0.5,
                         y: lift + sc(1.9),
                     },
                     s: if matches!(note.tech, Technique::HammerOn) {
@@ -457,11 +468,10 @@ fn technique(
         // A straight line rising or falling between the two frets; the legato
         // slide adds the slur, the picked one does not.
         Technique::Slide | Technique::SlideShift => {
-            let mut fret = None;
-            if let Some(nx) = partner(&mut fret) {
+            if let Some((end, fret)) = partner() {
                 let rise = match fret {
-                    Some(f) if f > note.fret => sc(0.7),
-                    Some(f) if f < note.fret => sc(-0.7),
+                    f if f > note.fret => sc(0.7),
+                    f if f < note.fret => sc(-0.7),
                     _ => 0.0,
                 };
                 out.push(Prim::Line {
@@ -470,7 +480,7 @@ fn technique(
                         y: y - rise,
                     },
                     b: P {
-                        x: nx - w * 0.5 - sc(0.5),
+                        x: end,
                         y: y + rise,
                     },
                     w: sc(0.28),
@@ -480,10 +490,7 @@ fn technique(
                     let lift = y + sc(FRET_CAP_MM * 0.8);
                     out.push(arc(
                         P { x: right, y: lift },
-                        P {
-                            x: nx - w * 0.5 - sc(0.5),
-                            y: lift,
-                        },
+                        P { x: end, y: lift },
                         sc(1.5),
                         sc(0.2),
                         color,
@@ -541,15 +548,11 @@ fn technique(
 
         // A grace note leans on the note that follows it.
         Technique::Grace => {
-            let mut fret = None;
-            if let Some(nx) = partner(&mut fret) {
+            if let Some((end, _)) = partner() {
                 let lift = y + sc(FRET_CAP_MM * 0.7);
                 out.push(arc(
                     P { x: right, y: lift },
-                    P {
-                        x: nx - w * 0.5 - sc(0.5),
-                        y: lift,
-                    },
+                    P { x: end, y: lift },
                     sc(1.4),
                     sc(0.2),
                     color,

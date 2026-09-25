@@ -1155,3 +1155,47 @@ fn labels_are_measured_in_helvetica() {
     // Past WinAnsi the PDF prints "?", 0.556 wide.
     assert!(close(em("♯"), 0.556));
 }
+
+#[test]
+fn a_slur_stops_just_short_of_its_partners_label() {
+    use grat::{staff::label_width, Prim};
+    for (from, to) in [(5, 12), (12, 5)] {
+        let mut doc = Document::new_empty();
+        let events = &mut doc.bars[0].events;
+        events[0].notes.push(Note {
+            string: 0,
+            fret: from,
+            tech: Technique::HammerOn,
+            tie_next: false,
+        });
+        events[1].notes.push(Note {
+            string: 0,
+            fret: to,
+            tech: Technique::Plain,
+            tie_next: false,
+        });
+        let prims = &layout::paginate(&doc)[0].prims;
+        let slur_end = prims
+            .iter()
+            .find_map(|p| match p {
+                Prim::Curve { b, color, .. } if *color == grat::model::COLOR_HAMMER_ON => Some(b.x),
+                _ => None,
+            })
+            .expect("a hammer-on slur");
+        let label_left = prims
+            .iter()
+            .find_map(|p| match p {
+                Prim::Text { pos, s, pt, .. } if *s == to.to_string() => {
+                    Some(pos.x - label_width(s, *pt) / 2.0)
+                }
+                _ => None,
+            })
+            .expect("the partner's fret label");
+        // Before: "5h12" ended the slur 0.4 mm inside the "12", and "12h5" left
+        // a gap half a digit wider than the one after the "12".
+        assert!(
+            (label_left - 1.0..=label_left).contains(&slur_end),
+            "{from}h{to}: slur ends at {slur_end}, label starts at {label_left}"
+        );
+    }
+}

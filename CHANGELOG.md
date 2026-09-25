@@ -4,6 +4,18 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.2.3] — 2026-09-25
+
+### Corrigé
+- À l'écran, les crochets des croches et doubles-croches isolées ont enfin leur vraie forme :
+  l'affichage remplissait toute la courbe comme une voile (trois fois la surface du crochet),
+  alors que le PDF était juste. Même correction pour les étoiles des décorations du logo.
+- Une liaison (hammer-on, pull-off, glissé, appoggiature) s'arrête juste avant le numéro
+  d'arrivée, calculé avec sa propre largeur : dans « 5h12 », l'arc entrait dans le « 12 ». La
+  lettre H ou P est centrée au-dessus de l'arc.
+- Changer la langue de l'interface met aussitôt la page à jour (noms d'accords, ligne
+  d'accordage), au lieu d'attendre la modification suivante.
+
 ## [4.2.2] — 2026-09-25
 
 ### Corrigé

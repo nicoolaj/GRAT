@@ -47,7 +47,7 @@ pub enum Shape {
         r: f32,
         color: Rgb,
     },
-    /// Filled convex polygon.
+    /// Filled simple polygon, convex or not: a star is not.
     Poly {
         pts: Vec<(f32, f32)>,
         color: Rgb,

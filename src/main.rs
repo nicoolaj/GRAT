@@ -908,6 +908,8 @@ impl TablaturesApp {
                             let checked = i18n::current_lang() == lang;
                             if ui.selectable_label(checked, lang.to_uppercase()).clicked() {
                                 i18n::set_lang(lang);
+                                // The page speaks it too: chord names, the tuning line.
+                                self.layout_dirty = true;
                                 ui.close();
                             }
                         }
