@@ -1235,3 +1235,14 @@ fn bar_numbers_open_each_system_and_mark_every_bar_of_the_strip() {
         .iter()
         .all(|n| n.2 + layout::BAR_NUMBER_CAP_MM <= strip.height));
 }
+
+#[test]
+fn a_repeat_count_loads_within_what_the_menus_offer() {
+    let doc = Document::from_json(
+        r#"{"bars": [{"repeat_end": 200, "events": [{"dur": 3840}]},
+                     {"repeat_end": 0, "events": [{"dur": 3840}]}]}"#,
+    )
+    .unwrap();
+    assert_eq!(doc.bars[0].repeat_end, Some(grat::model::MAX_REPEAT_PLAYS));
+    assert_eq!(doc.bars[1].repeat_end, Some(2));
+}

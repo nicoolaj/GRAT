@@ -35,6 +35,8 @@ const SHORTCUT_CUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::X);
 const SHORTCUT_PASTE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::V);
+const SHORTCUT_REPEAT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R);
 const SHORTCUT_LIVE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::L);
 
@@ -876,6 +878,13 @@ impl TablaturesApp {
                     self.tuning_menus(ui);
                 });
 
+                ui.menu_button(t("menu.bar"), |ui| {
+                    if canvas::bar_menu(ui, &mut self.editor, &mut self.doc) {
+                        self.dirty = true;
+                        self.layout_dirty = true;
+                    }
+                });
+
                 ui.menu_button(t("menu.tools"), |ui| {
                     ui.menu_button(t("menu.time_sig_all"), |ui| {
                         for sig in canvas::TIME_SIGS {
@@ -1205,6 +1214,12 @@ impl eframe::App for TablaturesApp {
                 self.layout_dirty = true;
             }
         }
+        if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_REPEAT))
+            && canvas::repeat_selection(&mut self.editor, &mut self.doc)
+        {
+            self.dirty = true;
+            self.layout_dirty = true;
+        }
         if ui.ctx().input_mut(|i| i.consume_shortcut(&SHORTCUT_LIVE)) {
             if self.live.open {
                 self.live.exit();
@@ -1409,6 +1424,7 @@ impl eframe::App for TablaturesApp {
                     ("menu.copy", &SHORTCUT_COPY),
                     ("menu.cut", &SHORTCUT_CUT),
                     ("menu.paste", &SHORTCUT_PASTE),
+                    ("menu.repeat_selection", &SHORTCUT_REPEAT),
                     ("menu.live", &SHORTCUT_LIVE),
                     ("menu.quit", &SHORTCUT_QUIT),
                 ] {
@@ -1470,6 +1486,301 @@ impl eframe::App for TablaturesApp {
 mod tests {
     use super::*;
     use eframe::App as _;
+
+    /// The app run headless, one frame at a time, with each frame painted into
+    /// an image: egui's own meshes and font atlas, rasterised here. It is how the
+    /// UI gets looked at without a window (`make run` blocks an agent session):
+    /// `cargo test --bin grat ui_screenshots -- --ignored` writes `dist/ui-*.png`.
+    struct Shooter {
+        ctx: egui::Context,
+        app: TablaturesApp,
+        size: egui::Vec2,
+        time: f64,
+        textures: std::collections::HashMap<egui::TextureId, egui::ColorImage>,
+        last: Option<egui::FullOutput>,
+    }
+
+    impl Shooter {
+        fn new(doc: Document) -> Shooter {
+            let ctx = egui::Context::default();
+            let (rgba, w, h) = load_logo_rgba();
+            let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+            let mut app = TablaturesApp::new(&cc, rgba, w, h, None);
+            app.splash_until = None;
+            app.doc = doc;
+            let mut shooter = Shooter {
+                ctx,
+                app,
+                size: egui::vec2(1100.0, 760.0),
+                time: 0.0,
+                textures: Default::default(),
+                last: None,
+            };
+            shooter.frame(Vec::new());
+            shooter.frame(Vec::new());
+            shooter
+        }
+
+        /// Run one frame with `events` as its input, keeping the font atlas up to date.
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            self.time += 0.1;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
+                time: Some(self.time),
+                events,
+                ..Default::default()
+            };
+            let mut out = self.ctx.run_ui(input, |ui| {
+                let mut frame = eframe::Frame::_new_kittest();
+                self.app.logic(ui.ctx(), &mut frame);
+                self.app.ui(ui, &mut frame);
+            });
+            for (id, deltas) in out.textures_delta.set.drain() {
+                for delta in deltas {
+                    let egui::ImageData::Color(patch) = delta.image;
+                    let Some([x0, y0]) = delta.pos else {
+                        self.textures.insert(id, (*patch).clone());
+                        continue;
+                    };
+                    let tex = self
+                        .textures
+                        .get_mut(&id)
+                        .expect("patch of a known texture");
+                    for y in 0..patch.size[1] {
+                        for x in 0..patch.size[0] {
+                            tex.pixels[(y0 + y) * tex.size[0] + x0 + x] =
+                                patch.pixels[y * patch.size[0] + x];
+                        }
+                    }
+                }
+            }
+            out.textures_delta.clear();
+            self.last = Some(out);
+        }
+
+        /// Where the last frame painted exactly `needle`: its centre.
+        fn text(&self, needle: &str) -> egui::Pos2 {
+            fn find(shape: &egui::Shape, needle: &str) -> Option<egui::Pos2> {
+                match shape {
+                    egui::Shape::Text(t) if t.galley.text() == needle => {
+                        Some(t.pos + t.galley.rect.center().to_vec2())
+                    }
+                    egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| find(s, needle)),
+                    _ => None,
+                }
+            }
+            let out = self.last.as_ref().expect("a frame ran");
+            out.shapes
+                .iter()
+                .find_map(|c| find(&c.shape, needle))
+                .unwrap_or_else(|| panic!("no text {needle:?} on screen"))
+        }
+
+        /// Click (`button`) at `pos`: move there, press and release, a frame each.
+        fn click(
+            &mut self,
+            pos: egui::Pos2,
+            button: egui::PointerButton,
+            modifiers: egui::Modifiers,
+        ) {
+            self.frame(vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                self.frame(vec![egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers,
+                }]);
+            }
+            self.frame(Vec::new());
+        }
+
+        /// Paint the last frame and write it to `dist/ui-<name>.png`.
+        fn shoot(&mut self, name: &str) {
+            let out = self.last.take().expect("a frame ran");
+            let (w, h) = (self.size.x as usize, self.size.y as usize);
+            let mut fb = vec![[0u8, 0, 0, 255]; w * h];
+            for prim in self.ctx.tessellate(out.shapes.clone(), 1.0) {
+                let egui::epaint::Primitive::Mesh(mesh) = &prim.primitive else {
+                    continue;
+                };
+                let tex = &self.textures[&mesh.texture_id];
+                for tri in mesh.indices.chunks(3) {
+                    let [a, b, c] = [0, 1, 2].map(|k| mesh.vertices[tri[k] as usize]);
+                    raster(&mut fb, w, h, prim.clip_rect, tex, [a, b, c]);
+                }
+            }
+            self.last = Some(out);
+            let bytes: Vec<u8> = fb.into_iter().flatten().collect();
+            std::fs::create_dir_all("dist").unwrap();
+            image::RgbaImage::from_raw(w as u32, h as u32, bytes)
+                .unwrap()
+                .save(format!("dist/ui-{name}.png"))
+                .unwrap();
+        }
+    }
+
+    /// One textured, coloured triangle, blended over `fb` the way egui blends:
+    /// premultiplied alpha, in gamma space.
+    fn raster(
+        fb: &mut [[u8; 4]],
+        w: usize,
+        h: usize,
+        clip: egui::Rect,
+        tex: &egui::ColorImage,
+        v: [egui::epaint::Vertex; 3],
+    ) {
+        let edge = |a: egui::Pos2, b: egui::Pos2, p: egui::Pos2| {
+            (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+        };
+        let area = edge(v[0].pos, v[1].pos, v[2].pos);
+        if area.abs() < 1e-9 {
+            return;
+        }
+        let lo = v.iter().fold(clip.max, |m, x| m.min(x.pos)).max(clip.min);
+        let hi = v.iter().fold(clip.min, |m, x| m.max(x.pos)).min(clip.max);
+        let (x0, y0) = (
+            lo.x.floor().max(0.0) as usize,
+            lo.y.floor().max(0.0) as usize,
+        );
+        let (x1, y1) = ((hi.x.ceil() as usize).min(w), (hi.y.ceil() as usize).min(h));
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let p = egui::pos2(x as f32 + 0.5, y as f32 + 0.5);
+                let wt = [
+                    edge(v[1].pos, v[2].pos, p) / area,
+                    edge(v[2].pos, v[0].pos, p) / area,
+                    edge(v[0].pos, v[1].pos, p) / area,
+                ];
+                if wt.iter().any(|&k| k < 0.0) || !clip.contains(p) {
+                    continue;
+                }
+                let uv = v[0].uv.to_vec2() * wt[0]
+                    + v[1].uv.to_vec2() * wt[1]
+                    + v[2].uv.to_vec2() * wt[2];
+                let tx = ((uv.x * tex.size[0] as f32) as usize).min(tex.size[0] - 1);
+                let ty = ((uv.y * tex.size[1] as f32) as usize).min(tex.size[1] - 1);
+                let texel = tex.pixels[ty * tex.size[0] + tx].to_array();
+                let src: [f32; 4] = std::array::from_fn(|c| {
+                    let colour: f32 = (0..3)
+                        .map(|k| v[k].color.to_array()[c] as f32 * wt[k])
+                        .sum();
+                    colour * texel[c] as f32 / 255.0
+                });
+                let dst = &mut fb[y * w + x];
+                for c in 0..4 {
+                    dst[c] = (src[c] + dst[c] as f32 * (1.0 - src[3] / 255.0))
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_right_click_inside_the_selection_keeps_it() {
+        let mut doc = Document::new_empty();
+        for (bar, fret) in [(0, 5), (3, 7)] {
+            doc.bars[bar].events[0].notes.push(grat::model::Note {
+                string: 1,
+                fret,
+                tech: Technique::Plain,
+                tie_next: false,
+            });
+        }
+        let mut shot = Shooter::new(doc);
+        let range = (
+            Some(canvas::Sel {
+                bar: 1,
+                event: 3,
+                string: 0,
+            }),
+            Some(canvas::Sel {
+                bar: 0,
+                event: 0,
+                string: 0,
+            }),
+        );
+        (shot.app.editor.selected, shot.app.editor.range_anchor) = range;
+        let inside = shot.text("5");
+        shot.click(
+            inside,
+            egui::PointerButton::Secondary,
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(
+            (shot.app.editor.selected, shot.app.editor.range_anchor),
+            range
+        );
+
+        let outside = shot.text("7");
+        shot.click(
+            outside,
+            egui::PointerButton::Secondary,
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(shot.app.editor.range_anchor, None);
+        assert_eq!(
+            shot.app.editor.selected.map(|s| (s.bar, s.event)),
+            Some((3, 0))
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn ui_screenshots() {
+        let mut doc = Document::new_empty();
+        doc.title = "Screenshot".into();
+        doc.bars[0].events[0].notes.push(grat::model::Note {
+            string: 1,
+            fret: 5,
+            tech: Technique::Plain,
+            tie_next: false,
+        });
+        let mut shot = Shooter::new(doc);
+        // Bars 2 to 3 selected, repeated three times, then the Bar menu opened.
+        shot.app.editor.selected = Some(canvas::Sel {
+            bar: 2,
+            event: 3,
+            string: 0,
+        });
+        shot.app.editor.range_anchor = Some(canvas::Sel {
+            bar: 1,
+            event: 0,
+            string: 0,
+        });
+        assert!(canvas::repeat_selection(
+            &mut shot.app.editor,
+            &mut shot.app.doc
+        ));
+        shot.app.doc.bars[2].repeat_end = Some(3);
+        shot.app.layout_dirty = true;
+        shot.frame(Vec::new());
+        shot.shoot("editor");
+        let menu = shot.text(&t("menu.bar"));
+        shot.click(menu, egui::PointerButton::Primary, egui::Modifiers::NONE);
+        shot.shoot("bar-menu");
+        shot.frame(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        shot.app.editor.selected = Some(canvas::Sel {
+            bar: 0,
+            event: 3,
+            string: 0,
+        });
+        shot.app.editor.range_anchor = Some(canvas::Sel {
+            bar: 0,
+            event: 0,
+            string: 0,
+        });
+        let cell = shot.text("5");
+        shot.click(cell, egui::PointerButton::Secondary, egui::Modifiers::NONE);
+        shot.shoot("right-click");
+    }
 
     /// One close request, as the window's close button sends it, run through
     /// `logic` the way eframe does for a minimised window. True if it was held.

@@ -1617,7 +1617,7 @@ dependencies = [
 
 [[package]]
 name = "grat"
-version = "4.3.0"
+version = "4.4.0"
 dependencies = [
  "eframe",
  "image",

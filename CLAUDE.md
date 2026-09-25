@@ -88,7 +88,10 @@ never know about pages, egui or PDF.
    grid only counts the right number of bars if it walks that same document too, and the tone list
    only strikes the right pitch at the right moment if it reads ties (`Note::tie_next`) off that
    same document rather than the editor's own.
-   `LiveState::enter` builds all five together for exactly that reason; don't split it up. A
+   `LiveState::enter` builds all five together for exactly that reason; don't split it up.
+   Cues and beats walk `engrave::play_order` of that document -- repeats unrolled, so a repeated
+   bar is visited again -- and a cue's `step` (its bar's place in that order) is what tells a
+   bar's two passes apart: a tie, a seek and the playhead's glide all go by `step`, not `bar`. A
    count-in's own beat grid is the one exception: built fresh per play, from a throwaway document of
    empty bars, not from `Show` — see `live::start_count_in`.
 9. **Fret labels contain `<`, `>`, `(`, `)`** (harmonics `<12>`, ghost notes `(5)`, trills `5(9)`).
@@ -284,6 +287,17 @@ not things assertions can judge.
 
 On macOS without an SVG viewer to hand: `qlmanage -t -s 1500 -o /tmp dist/notation-preview.svg`
 produces a PNG.
+
+The editor and live windows themselves, without opening one (`make run` blocks an agent session):
+
+```bash
+cargo test --bin grat ui_screenshots -- --ignored   # writes dist/ui-*.png
+```
+
+`Shooter` (in `main.rs`'s tests) runs the real `TablaturesApp` headless, one frame at a time: it
+can click a label found by its exact text (`Shooter::text`), and paints a frame by rasterising
+egui's own meshes and font atlas into a PNG. Add a shot to `ui_screenshots` for any UI you change,
+and look at it -- it is also how `a_right_click_inside_the_selection_keeps_it` drives the mouse.
 
 `cargo test --test decorations_visual` is the same idea for `decorations.rs`: it writes every
 calendar decoration's vector shapes to `dist/decorations-preview.svg` and bakes each one onto a

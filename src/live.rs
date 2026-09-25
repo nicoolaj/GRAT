@@ -442,7 +442,7 @@ fn tones(doc: &Document, cues: &[Cue]) -> Vec<Tone> {
         for note in &event.notes {
             // A continuation of a tie split at a beat boundary: already
             // sounded as part of the chain its first piece started below.
-            if i > 0 && cues[i - 1].bar == cue.bar {
+            if i > 0 && cues[i - 1].step == cue.step {
                 let prev_event = &doc.bars[cue.bar].events[cues[i - 1].event];
                 if prev_event
                     .notes
@@ -469,7 +469,7 @@ fn tones(doc: &Document, cues: &[Cue]) -> Vec<Tone> {
                 let Some(next) = cues.get(last + 1) else {
                     break;
                 };
-                if next.bar != cues[last].bar {
+                if next.step != cues[last].step {
                     break;
                 }
                 let next_event = &doc.bars[next.bar].events[next.event];
@@ -607,7 +607,8 @@ impl LiveState {
     pub fn enter(&mut self, doc: &Document) {
         let source = doc.clone();
         let doc = engrave::for_export(doc);
-        let cues = engrave::timeline(&doc);
+        let order = engrave::play_order(&doc);
+        let cues = engrave::timeline(&doc, &order);
         let tones = tones(&doc, &cues);
         self.open = true;
         self.playing = false;
@@ -616,7 +617,7 @@ impl LiveState {
         self.flash = None;
         self.audio = Audio::open();
         self.show = Some(Show {
-            beats: engrave::metronome_beats(&doc),
+            beats: engrave::metronome_beats(&doc, &order),
             duration: cues.last().map(|c| c.end).unwrap_or(0.0),
             tempo: doc.tempo,
             bars: doc.bars.len(),
@@ -680,7 +681,7 @@ fn start_count_in(bars: u32, sig: (u8, u8), tempo: u16) -> CountIn {
         .map(|_| model::Bar::new_empty(Some(sig)))
         .collect();
     CountIn {
-        beats: engrave::metronome_beats(&doc),
+        beats: engrave::metronome_beats(&doc, &(0..bars as usize).collect::<Vec<_>>()),
         t: 0.0,
         duration: engrave::bar_duration_secs(sig, tempo) * bars as f32,
     }
@@ -706,17 +707,18 @@ fn toggle_play(state: &mut LiveState, show: &Show) {
     state.playing = true;
 }
 
-/// Move the playhead one bar back or forward, to that bar's first event.
+/// Move the playhead one bar back or forward in the order played -- through a
+/// repeat, not across it -- to that bar's first event.
 fn seek_bar(state: &mut LiveState, show: &Show, delta: i32) {
-    let bar = show
+    let step = show
         .cues
         .get(cue_index(&show.cues, state.t))
-        .map_or(0, |c| c.bar);
-    let target = (bar as i32 + delta).max(0) as usize;
+        .map_or(0, |c| c.step);
+    let target = (step as i64 + i64::from(delta)).max(0) as usize;
     state.t = show
         .cues
         .iter()
-        .find(|c| c.bar >= target)
+        .find(|c| c.step >= target)
         .map_or(show.duration, |c| c.start);
 }
 
@@ -1020,10 +1022,14 @@ fn head_x(show: &Show, t: f32) -> f32 {
         return strip.x;
     };
     let x0 = strip.event_x(cue.bar, cue.event).unwrap_or(strip.x);
+    // Forward only: where the next event lies back up the line -- a repeat
+    // going round again -- glide on to this bar's closing barline, and jump.
     let x1 = show
         .cues
         .get(cue_index(&show.cues, t) + 1)
         .and_then(|n| strip.event_x(n.bar, n.event))
+        .filter(|&x| x > x0)
+        .or_else(|| strip.bar_span(cue.bar).map(|(_, end)| end))
         .unwrap_or_else(|| strip.end_x());
     let k = ((t - cue.start) / (cue.end - cue.start).max(f32::EPSILON)).clamp(0.0, 1.0);
     x0 + (x1 - x0) * k
@@ -1089,8 +1095,9 @@ fn draw_linear(
 }
 
 /// Where the page view centres at `t`, and the column the marker covers: the
-/// current event's column, glided towards the next one while both sit on the same
-/// system, snapped otherwise — a line break is a jump, not a slide.
+/// current event's column, glided towards the next one while it lies further
+/// along the same system, snapped otherwise — a line break, or a repeat going
+/// round again, is a jump, not a slide.
 fn page_focus(show: &Show, i: usize, t: f32) -> Option<(usize, egui::Vec2, P, P)> {
     let cue = show.cues.get(i)?;
     let (page, (lo, hi)) = find_column(&show.pages, cue.bar, cue.event)?;
@@ -1100,7 +1107,9 @@ fn page_focus(show: &Show, i: usize, t: f32) -> Option<(usize, egui::Vec2, P, P)
         .cues
         .get(i + 1)
         .and_then(|n| find_column(&show.pages, n.bar, n.event))
-        .filter(|&(p, (l, h))| p == page && (mid(l, h).y - here.y).abs() < 0.01)
+        .filter(|&(p, (l, h))| {
+            p == page && (mid(l, h).y - here.y).abs() < 0.01 && mid(l, h).x > here.x
+        })
         .map(|(_, (l, h))| mid(l, h));
     let centre = match next {
         Some(n) => {
@@ -1197,6 +1206,28 @@ mod tests {
     }
 
     #[test]
+    fn a_repeated_passage_sounds_every_time_round() {
+        let mut doc = Document::new_empty();
+        doc.bars.truncate(1);
+        doc.bars[0].events[0].notes.push(model::Note {
+            string: 0,
+            fret: 3,
+            tech: model::Technique::Plain,
+            tie_next: false,
+        });
+        doc.bars[0].repeat_start = true;
+        doc.bars[0].repeat_end = Some(3);
+        let doc = engrave::for_export(&doc);
+        let cues = engrave::timeline(&doc, &engrave::play_order(&doc));
+        let bar = engrave::bar_duration_secs((4, 4), doc.tempo);
+        let times: Vec<f32> = tones(&doc, &cues).iter().map(|t| t.time).collect();
+        assert_eq!(times.len(), 3, "{times:?}");
+        for (pass, t) in times.iter().enumerate() {
+            assert!((t - pass as f32 * bar).abs() < 1e-4, "{times:?}");
+        }
+    }
+
+    #[test]
     fn a_beat_split_tie_sounds_once_for_its_full_length() {
         // Two quarter notes on the open low E, tied: `for_export` produces exactly
         // this shape when a note straddles a beat, and only the first piece should
@@ -1235,7 +1266,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let cues = engrave::timeline(&doc);
+        let cues = engrave::timeline(&doc, &engrave::play_order(&doc));
         let out = tones(&doc, &cues);
 
         assert_eq!(out.len(), 1, "the tied continuation must not sound again");
@@ -1300,13 +1331,13 @@ mod tests {
         let close = |a: f32, b: f32| (a - b).abs() < 0.01;
 
         let bend = one_note_bar(model::Technique::Bend { quarters: 4 });
-        let cues = engrave::timeline(&bend);
+        let cues = engrave::timeline(&bend, &engrave::play_order(&bend));
         let out = tones(&bend, &cues);
         assert!(close(freq_at(&out[0].pitch, 0.0), f), "Bend starts written");
         assert!(close(freq_at(&out[0].pitch, 1.0), bent), "Bend ends bent");
 
         let release = one_note_bar(model::Technique::BendRelease { quarters: 4 });
-        let cues = engrave::timeline(&release);
+        let cues = engrave::timeline(&release, &engrave::play_order(&release));
         let out = tones(&release, &cues);
         assert!(
             close(freq_at(&out[0].pitch, 0.0), f),
@@ -1322,7 +1353,7 @@ mod tests {
         );
 
         let pre = one_note_bar(model::Technique::PreBend { quarters: 4 });
-        let cues = engrave::timeline(&pre);
+        let cues = engrave::timeline(&pre, &engrave::play_order(&pre));
         let out = tones(&pre, &cues);
         assert!(
             close(freq_at(&out[0].pitch, 0.0), bent),
@@ -1391,7 +1422,7 @@ mod tests {
             "the slide should have been split at the beat into a tied pair"
         );
 
-        let cues = engrave::timeline(&doc);
+        let cues = engrave::timeline(&doc, &engrave::play_order(&doc));
         let out = tones(&doc, &cues);
 
         assert_eq!(
@@ -1413,7 +1444,7 @@ mod tests {
         // alternation lands at frac 1/8.
         let doc = one_note_bar(model::Technique::Trill { to_fret: 5 });
         assert_eq!(doc.tempo, 120);
-        let cues = engrave::timeline(&doc);
+        let cues = engrave::timeline(&doc, &engrave::play_order(&doc));
         let out = tones(&doc, &cues);
 
         let f0 = low_e_fret(3);

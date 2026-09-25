@@ -44,6 +44,10 @@ pub const FORMAT_VERSION: u32 = 4;
 /// tuning; the presets top out at eight.
 pub const MAX_STRINGS: usize = 10;
 
+/// Most times a repeated passage may be marked to play: the menus offer 2 to
+/// this, and `from_json` pulls a hand-edited count back into that range.
+pub const MAX_REPEAT_PLAYS: u8 = 8;
+
 /// Highest fret a re-fretted note may land on.
 const MAX_FRET: i32 = 24;
 
@@ -737,6 +741,10 @@ impl Document {
         // inside, so it still renders as its author left it.
         doc.tab_scale = doc.tab_scale.clamp(0.25, 4.0);
         doc.note_spacing = doc.note_spacing.clamp(0.25, 4.0);
+        // The live player plays a passage this many times over.
+        for n in doc.bars.iter_mut().filter_map(|b| b.repeat_end.as_mut()) {
+            *n = (*n).clamp(2, MAX_REPEAT_PLAYS);
+        }
         // A hand-edited file could drop the tab; without it nothing is clickable.
         if !doc.rows.contains(&Row::Tab) {
             doc.rows.insert(0, Row::Tab);

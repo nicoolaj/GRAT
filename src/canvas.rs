@@ -7,7 +7,7 @@
 
 use eframe::egui;
 use grat::layout::Page;
-use grat::model::{Document, Instrument, NoteValue, Strum, Technique, MAX_DOTS};
+use grat::model::{Document, Instrument, NoteValue, Strum, Technique, MAX_DOTS, MAX_REPEAT_PLAYS};
 use grat::{engrave, i18n::t, model, staff, tablature, Align, Prim, PAGE_H_MM, PAGE_W_MM};
 
 /// Visual gap between stacked pages on screen. Screen-only: has no equivalent in
@@ -1057,24 +1057,37 @@ pub fn show(
                 }
             }
 
+            // A right click inside a range keeps it, so the menu acts on all of
+            // it; anywhere else it selects the one cell under the pointer.
             if response.secondary_clicked() {
                 if let Some(p) = response.interact_pointer_pos() {
                     let sel = pick(pages, content_min, state.zoom, p);
-                    set_sel(state, sel);
+                    let inside = match (sel, state.selected, state.range_anchor) {
+                        (Some(s), Some(cur), Some(anchor)) => {
+                            let (lo, hi) = event_span(anchor, cur);
+                            (lo..=hi).contains(&(s.bar, s.event))
+                        }
+                        _ => false,
+                    };
+                    if !inside {
+                        state.range_anchor = None;
+                        set_sel(state, sel);
+                    }
                 }
             }
-            // A `Hit` exists even for an empty cell, so only offer a menu once a
-            // real note is there and its technique actually carries a number.
-            // context_menu() has to be called every frame (not just on the click)
-            // for the popup to stay open -- it does its own secondary-click
-            // detection, so this runs unconditionally and is a no-op most frames.
+            // The right-click menu: the note's own number when its technique
+            // carries one (a `Hit` exists even for an empty cell), then the Bar
+            // menu for the selected bars. context_menu() has to be called every
+            // frame (not just on the click) for the popup to stay open -- it does
+            // its own secondary-click detection, so this runs unconditionally and
+            // is a no-op most frames.
             if let Some(sel) = state.selected {
                 let param = sel
                     .note(doc)
                     .and_then(|n| n.tech.param().map(|p| (n.tech, p)));
-                if let Some((tech, (v0, range))) = param {
-                    let mut v = v0;
-                    response.context_menu(|ui| {
+                response.context_menu(|ui| {
+                    if let Some((tech, (v0, range))) = param {
+                        let mut v = v0;
                         ui.label(t(param_key(&tech)));
                         let dv = ui.add(egui::DragValue::new(&mut v).range(range));
                         if dv.drag_started() || (dv.changed() && !dv.dragged()) {
@@ -1086,8 +1099,12 @@ pub fn show(
                             }
                             action = Some(Action::Changed);
                         }
-                    });
-                }
+                        ui.separator();
+                    }
+                    if bar_menu(ui, state, doc) {
+                        action = Some(Action::Changed);
+                    }
+                });
             }
 
             if response.has_focus() {
@@ -1358,6 +1375,106 @@ fn tech_button(
     }
 }
 
+/// The bars the selection covers, first and last, while the document has them.
+fn selected_bars(state: &EditorState, doc: &Document) -> Option<(usize, usize)> {
+    let sel = state.selected?;
+    let anchor = state.range_anchor.unwrap_or(sel);
+    let (first, last) = (sel.bar.min(anchor.bar), sel.bar.max(anchor.bar));
+    (last < doc.bars.len()).then_some((first, last))
+}
+
+/// Repeat the selected bars: an opening repeat on the first, a closing one on
+/// the last -- or, where they carry exactly that already, take both off.
+pub fn repeat_selection(state: &mut EditorState, doc: &mut Document) -> bool {
+    let Some((first, last)) = selected_bars(state, doc) else {
+        return false;
+    };
+    let on = doc.bars[first].repeat_start && doc.bars[last].repeat_end.is_some();
+    mutate(state, doc, |doc| {
+        doc.bars[first].repeat_start = !on;
+        let end = &mut doc.bars[last].repeat_end;
+        *end = if on { None } else { Some(end.unwrap_or(2)) };
+    });
+    true
+}
+
+/// The selected bars' repeat marks: an opening repeat on the first bar, a
+/// closing one on the last, and how many times the passage plays. The palette,
+/// the Bar menu and the right-click menu all show these same controls. True
+/// when the document changed.
+pub fn repeat_controls(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -> bool {
+    let bars = selected_bars(state, doc);
+    let mut changed = false;
+    let mut start = bars.is_some_and(|(first, _)| doc.bars[first].repeat_start);
+    if ui
+        .add_enabled(
+            bars.is_some(),
+            egui::Checkbox::new(&mut start, t("bar.repeat_start")),
+        )
+        .changed()
+    {
+        if let Some((first, _)) = bars {
+            mutate(state, doc, |doc| doc.bars[first].repeat_start = start);
+            changed = true;
+        }
+    }
+    let plays = bars.and_then(|(_, last)| doc.bars[last].repeat_end);
+    ui.horizontal(|ui| {
+        let mut end = plays.is_some();
+        if ui
+            .add_enabled(
+                bars.is_some(),
+                egui::Checkbox::new(&mut end, t("bar.repeat_end")),
+            )
+            .changed()
+        {
+            if let Some((_, last)) = bars {
+                mutate(state, doc, |doc| {
+                    doc.bars[last].repeat_end = end.then_some(2)
+                });
+                changed = true;
+            }
+        }
+        if let (Some(mut n), Some((_, last))) = (plays, bars) {
+            let dv = ui
+                .add(
+                    egui::DragValue::new(&mut n)
+                        .range(2..=MAX_REPEAT_PLAYS)
+                        .prefix("×"),
+                )
+                .on_hover_text(t("bar.repeat_plays"));
+            if dv.drag_started() || (dv.changed() && !dv.dragged()) {
+                snapshot(state, doc);
+            }
+            if dv.changed() {
+                doc.bars[last].repeat_end = Some(n);
+                changed = true;
+            }
+        }
+    });
+    changed
+}
+
+/// The Bar menu, shown both in the menu bar and at a right click on the score:
+/// everything done to the selected bars. True when the document changed.
+pub fn bar_menu(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -> bool {
+    let enabled = selected_bars(state, doc).is_some();
+    let mut changed = false;
+    let shortcut = ui.ctx().format_shortcut(&crate::SHORTCUT_REPEAT);
+    if ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(t("menu.repeat_selection")).shortcut_text(shortcut),
+        )
+        .clicked()
+    {
+        changed |= repeat_selection(state, doc);
+        ui.close();
+    }
+    changed |= repeat_controls(ui, state, doc);
+    changed
+}
+
 /// The left tool palette: every technique, note values with dots, a rest button,
 /// the strum/tap marks, palm-mute/let-ring toggles for the selected event, and
 /// repeat toggles for the selected bar.
@@ -1473,43 +1590,8 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
 
     ui.separator();
     let bar_idx = sel.map(|s| s.bar);
-    let mut repeat_start = bar_idx
-        .and_then(|b| doc.bars.get(b))
-        .is_some_and(|b| b.repeat_start);
-    if ui
-        .add_enabled(
-            bar_idx.is_some(),
-            egui::Checkbox::new(&mut repeat_start, t("bar.repeat_start")),
-        )
-        .changed()
-    {
-        if let Some(b) = bar_idx {
-            mutate(state, doc, move |doc| {
-                if let Some(bar) = doc.bars.get_mut(b) {
-                    bar.repeat_start = repeat_start;
-                }
-            });
-            action = Some(Action::Changed);
-        }
-    }
-    let mut repeat_end = bar_idx
-        .and_then(|b| doc.bars.get(b))
-        .is_some_and(|b| b.repeat_end.is_some());
-    if ui
-        .add_enabled(
-            bar_idx.is_some(),
-            egui::Checkbox::new(&mut repeat_end, t("bar.repeat_end")),
-        )
-        .changed()
-    {
-        if let Some(b) = bar_idx {
-            mutate(state, doc, move |doc| {
-                if let Some(bar) = doc.bars.get_mut(b) {
-                    bar.repeat_end = if repeat_end { Some(2) } else { None };
-                }
-            });
-            action = Some(Action::Changed);
-        }
+    if repeat_controls(ui, state, doc) {
+        action = Some(Action::Changed);
     }
 
     ui.separator();
@@ -1901,6 +1983,35 @@ mod tests {
         assert!(is_convex(&head));
         let beam = [(0.0, 0.0), (8.0, 1.0), (8.0, 2.2), (0.0, 1.2)].map(|(x, y)| egui::pos2(x, y));
         assert!(is_convex(&beam));
+    }
+
+    #[test]
+    fn repeating_the_selection_marks_its_first_and_last_bars() {
+        let mut doc = Document::new_empty();
+        let cell = |bar| Sel {
+            bar,
+            event: 0,
+            string: 0,
+        };
+        let mut state = EditorState {
+            selected: Some(cell(3)),
+            range_anchor: Some(cell(1)),
+            ..Default::default()
+        };
+        assert!(repeat_selection(&mut state, &mut doc));
+        assert!(doc.bars[1].repeat_start && doc.bars[3].repeat_end == Some(2));
+        assert!(!doc.bars[2].repeat_start && doc.bars[2].repeat_end.is_none());
+
+        // A count already chosen survives taking the marks off and on again.
+        doc.bars[3].repeat_end = Some(4);
+        assert!(repeat_selection(&mut state, &mut doc));
+        assert!(!doc.bars[1].repeat_start && doc.bars[3].repeat_end.is_none());
+        assert!(undo(&mut state, &mut doc), "one undo step");
+        assert_eq!(doc.bars[3].repeat_end, Some(4));
+
+        state.range_anchor = None;
+        state.selected = Some(cell(99));
+        assert!(!repeat_selection(&mut state, &mut doc), "no such bar");
     }
 
     #[test]

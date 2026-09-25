@@ -4,6 +4,22 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.4.0] — 2026-09-26
+
+### Ajouté
+- Le lecteur live joue les reprises : le passage entre ‖: et :‖ est rejoué autant de fois
+  qu'indiqué, avec le métronome et le son. Les flèches ← → avancent mesure par mesure dans
+  l'ordre joué, et la vue défile d'un trait jusqu'à la barre de reprise avant de revenir.
+- Le nombre de passages d'une reprise se choisit de ×2 à ×8 (« x3 » s'imprime au-dessus de la
+  barre).
+- Nouveau menu « Mesure », repris au clic droit sur la partition : « Reprise sur la sélection »
+  (Cmd+R) pose ‖: sur la première mesure sélectionnée et :‖ sur la dernière, ou les retire. Les
+  cases de reprise de la palette agissent aussi sur toute la sélection.
+
+### Corrigé
+- Un clic droit à l'intérieur d'une sélection la conserve (le menu agit sur toute la plage) ; un
+  clic droit ailleurs sélectionne la seule case visée, au lieu d'étirer la sélection jusqu'à elle.
+
 ## [4.3.0] — 2026-09-26
 
 ### Ajouté

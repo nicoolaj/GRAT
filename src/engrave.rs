@@ -404,6 +404,9 @@ pub fn bar_duration_secs(time_sig: (u8, u8), tempo: u16) -> f32 {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cue {
     pub bar: usize,
+    /// Where `bar` stands in the order played: a repeated bar is one bar but
+    /// two steps, which is how a caller tells its two passes apart.
+    pub step: usize,
     pub event: usize,
     /// Seconds from the start of the piece.
     pub start: f32,
@@ -411,22 +414,55 @@ pub struct Cue {
     pub end: f32,
 }
 
-/// Every event of the document in playing order, timed at `doc.tempo` beats
-/// per minute (see [`seconds_per_tick`]).
+/// The bars in the order they are played, repeats unrolled: at a closing
+/// repeat marked to sound n times, back to its passage's start until the
+/// passage has sounded n times. A passage starts at the last opening repeat
+/// before it, or else just after the previous closing repeat, or else at the
+/// top of the piece.
 ///
-/// ponytail: repeats are not unrolled, so the piece plays through once, left to
-/// right -- unrolling would make it revisit bars, which every position lookup
-/// (this is the cue list every caller reads) would then have to disambiguate.
-pub fn timeline(doc: &Document) -> Vec<Cue> {
+/// Every closing repeat sends the player back at most n - 1 times, so this
+/// ends, and `Document::from_json` keeps n small.
+pub fn play_order(doc: &Document) -> Vec<usize> {
+    let mut order = Vec::with_capacity(doc.bars.len());
+    let mut sounded = vec![1u8; doc.bars.len()];
+    let (mut i, mut start) = (0, 0);
+    while let Some(bar) = doc.bars.get(i) {
+        if bar.repeat_start {
+            start = i;
+        }
+        order.push(i);
+        match bar.repeat_end {
+            Some(n) if sounded[i] < n => {
+                sounded[i] += 1;
+                i = start;
+            }
+            Some(_) => {
+                start = i + 1;
+                i += 1;
+            }
+            None => i += 1,
+        }
+    }
+    order
+}
+
+/// Every event of the bars in `order` -- [`play_order`] for the piece as
+/// written, a plain range for a looped passage -- timed at `doc.tempo` beats
+/// per minute (see [`seconds_per_tick`]).
+pub fn timeline(doc: &Document, order: &[usize]) -> Vec<Cue> {
     let mut t = 0.0;
     let mut out = Vec::new();
-    for (bar, b) in doc.bars.iter().enumerate() {
+    for (step, &bar) in order.iter().enumerate() {
+        let Some(b) = doc.bars.get(bar) else {
+            continue;
+        };
         let per_tick = seconds_per_tick(doc.time_sig_at(bar), doc.tempo);
         for (event, e) in b.events.iter().enumerate() {
             let start = t;
             t += e.dur.ticks() as f32 * per_tick;
             out.push(Cue {
                 bar,
+                step,
                 event,
                 start,
                 end: t,
@@ -455,13 +491,13 @@ pub struct Beat {
     pub beats_in_bar: u32,
 }
 
-/// Metronome pulses for every bar of `doc`, at `doc.tempo`. One pulse per beat of
-/// each bar's own metre -- the same grouping [`beam_groups`] beams by, so a
-/// compound bar like 6/8 clicks in two, not six.
-pub fn metronome_beats(doc: &Document) -> Vec<Beat> {
+/// Metronome pulses for the bars in `order` (as for [`timeline`]), at
+/// `doc.tempo`. One pulse per beat of each bar's own metre -- the same grouping
+/// [`beam_groups`] beams by, so a compound bar like 6/8 clicks in two, not six.
+pub fn metronome_beats(doc: &Document, order: &[usize]) -> Vec<Beat> {
     let mut t = 0.0;
     let mut out = Vec::new();
-    for bar in 0..doc.bars.len() {
+    for &bar in order.iter().filter(|&&b| b < doc.bars.len()) {
         let sig = doc.time_sig_at(bar);
         let per_tick = seconds_per_tick(sig, doc.tempo);
         let beat = beat_ticks(sig).max(1);

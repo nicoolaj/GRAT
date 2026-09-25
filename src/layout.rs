@@ -188,6 +188,14 @@ impl Strip {
     pub fn end_x(&self) -> f32 {
         self.x + self.spacing.width
     }
+
+    /// x of bar `bar`'s opening and closing barlines, in strip millimetres.
+    pub fn bar_span(&self, bar: usize) -> Option<(f32, f32)> {
+        self.spacing
+            .bars
+            .get(bar)
+            .map(|b| (self.x + b.x, self.x + b.x + b.width))
+    }
 }
 
 /// Lay `doc` out as a single [`Strip`].

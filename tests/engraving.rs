@@ -3,9 +3,9 @@
 
 use grat::engrave::{
     bar_duration_secs, bar_ticks, beam_groups, beam_run_span, beam_runs, is_complete,
-    metronome_beats, natural_bar_width, set_event_dur, set_time_sig, set_time_sig_everywhere,
-    shift_event_dur, split_ticks, system_spacing, time_sig_marks, timeline, BeamGroup, BAR_LEAD_MM,
-    GROUP_GAP, SLIDE_IN_LEAD_MM,
+    metronome_beats, natural_bar_width, play_order, set_event_dur, set_time_sig,
+    set_time_sig_everywhere, shift_event_dur, split_ticks, system_spacing, time_sig_marks,
+    timeline, BeamGroup, BAR_LEAD_MM, GROUP_GAP, SLIDE_IN_LEAD_MM,
 };
 use grat::model::*;
 use grat::notation;
@@ -845,7 +845,7 @@ fn timeline_turns_ticks_into_seconds_at_the_document_tempo() {
     });
     doc.tempo = 120; // a quarter note lasts half a second
 
-    let cues = timeline(&doc);
+    let cues = timeline(&doc, &play_order(&doc));
     assert_eq!(cues.len(), 4);
     // A rest is a cue like any other: the player counts it.
     assert_eq!((cues[1].bar, cues[1].event), (0, 1));
@@ -870,9 +870,9 @@ fn timeline_halves_when_the_tempo_doubles() {
         ..Default::default()
     });
     doc.tempo = 60;
-    let slow = timeline(&doc).last().unwrap().end;
+    let slow = timeline(&doc, &play_order(&doc)).last().unwrap().end;
     doc.tempo = 120;
-    let fast = timeline(&doc).last().unwrap().end;
+    let fast = timeline(&doc, &play_order(&doc)).last().unwrap().end;
     assert!(
         (slow - 4.0).abs() < 1e-4,
         "four beats at 60 bpm is four seconds"
@@ -899,7 +899,7 @@ fn metronome_clicks_once_per_beat_and_accents_the_downbeat() {
         },
     ];
 
-    let beats = metronome_beats(&doc);
+    let beats = metronome_beats(&doc, &play_order(&doc));
     assert_eq!(beats.len(), 8, "four quarter-note beats per 4/4 bar");
     for (i, want_time) in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
         .into_iter()
@@ -938,7 +938,7 @@ fn metronome_pulses_a_compound_metre_in_dotted_quarters_not_eighths() {
         ..Default::default()
     }];
 
-    let beats = metronome_beats(&doc);
+    let beats = metronome_beats(&doc, &play_order(&doc));
     assert_eq!(beats.len(), 2, "6/8 clicks in two, not six: {beats:?}");
     assert!(beats[0].downbeat && !beats[1].downbeat);
     // Tempo counts the dotted-quarter beat, not a plain quarter: at 120 bpm a
@@ -957,7 +957,7 @@ fn timeline_counts_a_compound_metre_in_dotted_quarters() {
     });
     doc.tempo = 120; // dotted quarter = 120 bpm, not a plain quarter
 
-    let cues = timeline(&doc);
+    let cues = timeline(&doc, &play_order(&doc));
     assert_eq!(cues.len(), 6);
     // Two dotted-quarter beats of 0.5s each, three eighths per beat.
     let wants = [
@@ -1098,4 +1098,56 @@ fn time_sig_marks_follow_engraving_rules() {
     let marks = time_sig_marks(&doc, &sp);
     assert_eq!(marks.len(), 1);
     assert!(marks[0].0 > sp.bars[1].x && marks[0].0 < sp.bars[1].events[0]);
+}
+
+#[test]
+fn play_order_unrolls_every_kind_of_repeat() {
+    let piece = |marks: &[(bool, Option<u8>)]| {
+        let mut doc = Document::new_empty();
+        doc.bars = marks
+            .iter()
+            .map(|&(repeat_start, repeat_end)| Bar {
+                repeat_start,
+                repeat_end,
+                ..Bar::new_empty(None)
+            })
+            .collect();
+        play_order(&doc)
+    };
+    let plain = (false, None);
+    assert_eq!(piece(&[plain; 3]), [0, 1, 2]);
+    // |: 1 2 :| then on.
+    assert_eq!(
+        piece(&[plain, (true, None), (false, Some(2)), plain]),
+        [0, 1, 2, 1, 2, 3]
+    );
+    assert_eq!(
+        piece(&[plain, (true, None), (false, Some(3)), plain]),
+        [0, 1, 2, 1, 2, 1, 2, 3]
+    );
+    // A closing repeat with no opening one goes back to the top...
+    assert_eq!(piece(&[plain, (false, Some(2)), plain]), [0, 1, 0, 1, 2]);
+    // ...or to just after the previous closing repeat.
+    assert_eq!(
+        piece(&[(false, Some(2)), plain, (false, Some(2))]),
+        [0, 0, 1, 2, 1, 2]
+    );
+    // One bar repeated on itself.
+    assert_eq!(piece(&[(true, Some(3))]), [0, 0, 0]);
+}
+
+#[test]
+fn a_repeat_plays_its_bars_again_one_step_further_on() {
+    let mut doc = Document::new_empty(); // bars of four quarter rests
+    doc.bars.truncate(2);
+    doc.bars[0].repeat_start = true;
+    doc.bars[1].repeat_end = Some(2);
+    let order = play_order(&doc);
+    let cues = timeline(&doc, &order);
+    assert_eq!(cues.len(), 16);
+    assert_eq!((cues[8].bar, cues[8].step, cues[8].event), (0, 2, 0));
+    assert!(cues
+        .windows(2)
+        .all(|w| (w[1].start - w[0].end).abs() < 1e-5));
+    assert_eq!(metronome_beats(&doc, &order).len(), 16);
 }
