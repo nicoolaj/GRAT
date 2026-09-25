@@ -4,6 +4,16 @@ Toutes les évolutions notables de GRAT sont consignées ici, reconstituées à 
 Git et de ses tags. Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le
 projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [4.2.0] — 2026-09-25
+
+### Ajouté
+- Nouvelles mesures proposées : 3/2, 6/4, 7/4, 3/8 et 5/8. La liste est désormais rangée par
+  dénominateur (2/2 et 3/2 en tête, puis les /4, puis les /8).
+
+### Corrigé
+- Le menu déroulant de la mesure n'est plus limité en hauteur : 2/2, placé en fin de liste,
+  était caché sous la barre de défilement.
+
 ## [4.1.2] — 2026-09-25
 
 ### Corrigé
@@ -373,6 +383,7 @@ Première version.
 - Édition à la souris et palette d'outils.
 - Export PDF (menu, Cmd+E, `--export`), pages À propos et Aide, icône macOS, exemples.
 
+[4.2.0]: https://github.com/nicoolaj/GRAT/compare/v4.1.2...v4.2.0
 [4.1.2]: https://github.com/nicoolaj/GRAT/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/nicoolaj/GRAT/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/nicoolaj/GRAT/compare/v4.0.0...v4.1.0

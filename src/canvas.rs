@@ -118,17 +118,25 @@ fn snapshot(state: &mut EditorState, doc: &Document) {
 /// Push an undo snapshot, then run the mutation.
 /// The time signatures offered, per bar here and for the whole piece in the
 /// Tools menu.
+/// Grouped by denominator so a signature is found where a musician looks for it.
+/// 6/4 counts in quarters (`engrave::beat_ticks` treats only `/8` and finer as
+/// compound).
 /// ponytail: fixed list; a num/den pair if someone asks for 13/16.
-pub const TIME_SIGS: [(u8, u8); 9] = [
+pub const TIME_SIGS: [(u8, u8); 14] = [
+    (2, 2),
+    (3, 2),
     (2, 4),
     (3, 4),
     (4, 4),
     (5, 4),
+    (6, 4),
+    (7, 4),
+    (3, 8),
+    (5, 8),
     (6, 8),
     (7, 8),
     (9, 8),
     (12, 8),
-    (2, 2),
 ];
 
 /// Rebar the whole piece in `sig`, undoably. The selection is dropped: the bar
@@ -1569,8 +1577,11 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
             (None, None) => t("bar.time_sig_inherit"),
         };
         ui.add_enabled_ui(valid_bar.is_some(), |ui| {
+            // Uncapped: egui's default 200 px scrolled the tail of the list,
+            // 2/2 included, out of sight.
             egui::ComboBox::from_id_salt("bar_time_sig")
                 .selected_text(label)
+                .height(f32::INFINITY)
                 .show_ui(ui, |ui| {
                     let b = valid_bar.unwrap_or(0);
                     if ui
@@ -1609,6 +1620,25 @@ pub fn palette(ui: &mut egui::Ui, state: &mut EditorState, doc: &mut Document) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_offered_time_sig_rebars_and_prints() {
+        for sig in TIME_SIGS {
+            let mut doc = Document::new_empty();
+            doc.bars[0].events[0].notes.push(model::Note {
+                string: 0,
+                fret: 3,
+                tech: Technique::Plain,
+                tie_next: false,
+            });
+            engrave::set_time_sig_everywhere(&mut doc, sig);
+            assert_eq!(doc.time_sig_at(0), sig);
+            for bar in &doc.bars {
+                assert!(engrave::is_complete(bar, sig), "{sig:?}: {bar:?}");
+            }
+            assert!(!grat::layout::paginate(&doc).is_empty(), "{sig:?}");
+        }
+    }
 
     #[test]
     fn retune_to_fewer_strings_keeps_the_selection_on_the_staff() {
