@@ -1985,6 +1985,9 @@ mod tests {
             }),
         );
         (shot.app.editor.selected, shot.app.editor.range_anchor) = range;
+        // Paint the selection before reading positions: in English the side
+        // panel widens once there is one, shifting the page 11 px right.
+        shot.frame(Vec::new());
         let inside = shot.text("5");
         shot.click(
             inside,
